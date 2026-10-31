@@ -1,0 +1,28 @@
+{
+  "name": "hmlwsdk",
+  "version": "0.1.0",
+  "description": "HarmonyOS LiteWearable SDK",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./bin": "./src/bin/index.js",
+    "./hap": "./src/hap/index.js"
+  },
+  "scripts": {
+    "test:config": "node test/config.js",
+    "test:res": "node test/resources.js",
+    "test:bin": "node test/roundtrip.js",
+    "test:hap": "node test/hap.js"
+  },
+  "keywords": [
+    "harmonyos",
+    "litewearable",
+    "hap",
+    "hmlw"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  }
+}
