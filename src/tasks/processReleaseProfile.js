@@ -1,14 +1,43 @@
-import * as debugTask from "./processDebugProfile.js";
+import fs from "fs";
+import path from "path";
+
+import { processProfile, stringifyConfig } from "../config/profile.js";
+import { deepEqual } from "./_util.js";
 
 /**
- * processReleaseProfile —— config.json 第二阶段加工（release 变体）
+ * processReleaseProfile —— config.json 第二阶段加工
  *
- * 与 debug 同一份实现。实测这步 Gradle 只调键顺序、不增删字段。
+ * 实测 Gradle 这一步只调键顺序、不增删字段：
+ *   merge_profile/release/config.json
+ *   process_profile/release/normal/config.json
  *
- * 未对照：_empty 只有 debug 的 process_profile 产物。
+ * 所以 processProfile() 现在只是 clone。保留独立函数是为了将来按 SDK
+ * 版本做字段迁移（ARK 变体还要追加 module.distro.virtualMachine）时，
+ * 改动有地方落。
  */
 
 export const name = "processReleaseProfile";
-export const produces = debugTask.produces;
-export const run = debugTask.run;
-export const verify = debugTask.verify;
+export const produces = "process_profile/release/normal/config.json";
+
+export function run(ctx) {
+  if (!ctx.config) throw new Error(`${name}: 缺少 ctx.config，必须先跑 mergeReleaseProfile`);
+
+  const outDir = path.join(ctx.work, "process_profile", "release", "normal");
+  const out = path.join(outDir, "config.json");
+
+  const config = processProfile(ctx.config);
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(out, stringifyConfig(config));
+
+  ctx.config = config;
+  ctx.paths.processProfile = out;
+  return out;
+}
+
+export function verify(ctx) {
+  const theirs = path.join(ctx.sample, "build", "intermediates", "process_profile", "release", "normal", "config.json");
+  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
+
+  const d = deepEqual(ctx.config, JSON.parse(fs.readFileSync(theirs, "utf8")));
+  return { ok: !d, detail: d ?? `${fs.statSync(theirs).size} B，内容一致` };
+}
