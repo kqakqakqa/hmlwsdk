@@ -9,12 +9,6 @@
     "./bin": "./src/bin/index.js",
     "./hap": "./src/hap/index.js"
   },
-  "scripts": {
-    "test:config": "node test/config.js",
-    "test:res": "node test/resources.js",
-    "test:bin": "node test/roundtrip.js",
-    "test:hap": "node test/hap.js"
-  },
   "keywords": [
     "harmonyos",
     "litewearable",
