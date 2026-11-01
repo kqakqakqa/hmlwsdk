@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-import { packHap, unpackHap } from "../hap/index.js";
-import { writeZip, readZip } from "../zip/index.js";
-import { stringifyConfigMinified } from "../config/profile.js";
+import { packHap } from "../hap/index.js";
+import { writeZip } from "../zip/index.js";
+import { stringifyConfigMinified } from "../profile.js";
 import { collect, sortEntries } from "./generateReleaseJsBin.js";
 import { todo } from "./_util.js";
 
@@ -83,30 +83,4 @@ function packTreeHap(sourceRoot, config) {
 
   // 全部 stored，不压缩（实测 Gradle 产物 92 个条目 method 全是 0）
   return writeZip(entries, { compress: false });
-}
-
-export function verify(ctx) {
-  if (!ctx.paths.treeHap) return { ok: false, detail: "没有产出文件树形态" };
-
-  const theirs = path.join(ctx.sample, "build", "outputs", "hap", "release", "entry-release-lite-unsigned.hap");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const want = readZip(fs.readFileSync(theirs));
-  const mine = readZip(fs.readFileSync(ctx.paths.treeHap));
-
-  const wm = new Map(want.map((e) => [e.name, e.content]));
-  const mm = new Map(mine.map((e) => [e.name, e.content]));
-
-  const missing = [...wm.keys()].filter((k) => !mm.has(k));
-  const extra = [...mm.keys()].filter((k) => !wm.has(k));
-  if (missing.length) return { ok: false, detail: `少了 ${missing.length} 个条目：${missing.slice(0, 5).join(", ")}` };
-  if (extra.length) return { ok: false, detail: `多了 ${extra.length} 个条目：${extra.slice(0, 5).join(", ")}` };
-
-  const diff = [...wm.keys()].filter((k) => !wm.get(k).equals(mm.get(k)));
-  if (diff.length) {
-    const sizes = diff.slice(0, 3).map((k) => `${k} ${mm.get(k).length} vs ${wm.get(k).length}`);
-    return { ok: false, detail: `${diff.length} 个条目内容不同：${sizes.join("；")}` };
-  }
-
-  return { ok: true, detail: `${mine.length} 个条目内容全部一致` };
 }

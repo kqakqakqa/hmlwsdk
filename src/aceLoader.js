@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 
-import { resolveTools, resolveNode } from "../sdk.js";
+import { resolveTools, resolveNode } from "./core/sdk.js";
 
 /**
  * 调 node + ace-loader/webpack 编译 JS/HML/CSS

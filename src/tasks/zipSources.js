@@ -29,7 +29,3 @@ export const produces = "无";
 export function run() {
   return null;
 }
-
-export function verify() {
-  return { ok: true, detail: "not planned" };
-}

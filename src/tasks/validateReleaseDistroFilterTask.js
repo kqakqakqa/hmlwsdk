@@ -32,7 +32,3 @@ export function run(ctx) {
     `有 ${entries.length} 个 entry 模块，要做 deviceType 分桶 + distroFilter 三维度互斥校验，还没写`
   );
 }
-
-export function verify() {
-  return { ok: true, detail: "单 entry 工程，校验分支不触发（与 gradle 一致）" };
-}

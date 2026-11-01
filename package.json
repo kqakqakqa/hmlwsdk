@@ -4,9 +4,12 @@
   "description": "HarmonyOS LiteWearable SDK",
   "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "hmlwsdk": "bin/hmlwsdk.js"
+  },
   "exports": {
     ".": "./src/index.js",
-    "./bin": "./src/bin/index.js",
+    "./binfile": "./src/binfile/index.js",
     "./hap": "./src/hap/index.js"
   },
   "scripts": {

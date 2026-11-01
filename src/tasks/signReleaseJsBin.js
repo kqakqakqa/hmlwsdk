@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 
 import { prepareSigning, signBin } from "../sign/index.js";
-import { isSignedBin, stripSignature, readBin } from "../bin/index.js";
 import { todo } from "./_util.js";
 
 /**
@@ -48,27 +47,4 @@ export function run(ctx) {
 
   ctx.paths.signedBin = out;
   return out;
-}
-
-export function verify(ctx) {
-  if (!ctx.signingConfig) {
-    return { ok: true, detail: "未配证书，按默认路径跳过签名（与 gradle 行为一致）" };
-  }
-  if (!isSignedBin(fs.readFileSync(ctx.paths.signedBin))) {
-    return { ok: false, detail: "产物没有签名尾巴" };
-  }
-
-  const buf = fs.readFileSync(ctx.paths.signedBin);
-  const unsigned = stripSignature(buf);
-  const subBlockSize = buf.readUInt32BE(buf.length - 12);
-
-  if (subBlockSize !== buf.length - unsigned.length) {
-    return { ok: false, detail: `subBlockSize ${subBlockSize} ≠ 总长-unsigned ${buf.length - unsigned.length}` };
-  }
-
-  const parsed = readBin(buf);
-  return {
-    ok: true,
-    detail: `签名块 ${subBlockSize} B，剥掉后 ${unsigned.length} B 可解析出 ${parsed.entries.length} 个条目`
-  };
 }

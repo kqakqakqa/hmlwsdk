@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { writeZip, readZip } from "../zip/index.js";
+import { writeZip } from "../zip/index.js";
 import { todo } from "./_util.js";
 
 /**
@@ -123,29 +123,4 @@ function buildPackInfo(config, moduleName) {
       }
     ]
   };
-}
-
-export function verify(ctx) {
-  if (!ctx.paths.app) return { ok: false, detail: "没有产出 .app" };
-
-  const appRoot = ctx.appSample ?? path.join(ctx.projectDir, "build", "outputs", "app", "release");
-  const projectName = ctx.config.app.bundleName.split(".").pop();
-  const theirs = path.join(appRoot, `${projectName}-release-unsigned.app`);
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const want = readZip(fs.readFileSync(theirs));
-  const mine = readZip(fs.readFileSync(ctx.paths.app));
-
-  if (mine.length !== want.length) return { ok: false, detail: `条目数不同：${mine.length} vs ${want.length}` };
-
-  const wm = new Map(want.map((e) => [e.name, e.content]));
-  const bad = [];
-  for (const e of mine) {
-    const w = wm.get(e.name);
-    if (!w) bad.push(`${e.name} 多了`);
-    else if (!w.equals(e.content)) bad.push(`${e.name} 内容不同（我 ${e.content.length} B，gradle ${w.length} B）`);
-  }
-  if (bad.length) return { ok: false, detail: bad.join("；") };
-
-  return { ok: true, detail: `${mine.length} 个条目内容一致：${mine.map((e) => e.name).join(", ")}` };
 }

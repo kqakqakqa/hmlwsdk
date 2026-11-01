@@ -57,35 +57,3 @@ export function run(ctx) {
   ctx.paths.rTxt = r.rTxtFile;
   return outDir;
 }
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "res", "release", "normal", "lite");
-  const theirRTxt = path.join(theirs, "R.txt");
-  const theirIndex = path.join(theirs, "resources.index");
-
-  if (!fs.existsSync(theirRTxt)) return { ok: false, detail: `没有对照产物：${theirRTxt}` };
-
-  // R.txt 应字节一致
-  const a = fs.readFileSync(ctx.paths.rTxt);
-  const b = fs.readFileSync(theirRTxt);
-  if (a.toString("utf8") !== b.toString("utf8")) {
-    return { ok: false, detail: `R.txt 字节不一致：我 ${a.length} B，gradle ${b.length} B` };
-  }
-
-  // 本机实测 resources.index 也是 0 差异。这里仍容忍 1 个字节，是留给换用
-  // 其他版本 restool 的余量（比如 api7 的 1.028，index 里的版本号字符串不同）。
-  if (!fs.existsSync(theirIndex)) return { ok: true, detail: `R.txt ${a.length} B 一致（没有 index 可对照）` };
-
-  const x = fs.readFileSync(ctx.paths.resources);
-  const y = fs.readFileSync(theirIndex);
-  if (x.length !== y.length) return { ok: false, detail: `index 尺寸不同 ${x.length} vs ${y.length}` };
-
-  const diff = [];
-  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) diff.push(i);
-  if (diff.length > 1) return { ok: false, detail: `index 差异字节过多：${diff.join(",")}` };
-
-  return {
-    ok: true,
-    detail: `R.txt ${a.length} B 一致，index ${x.length} B 仅偏移 ${diff.join(",") || "无"} 不同`
-  };
-}

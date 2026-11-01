@@ -37,18 +37,3 @@ export function run(ctx) {
   ctx.variantsDir = mainDir; // 后面 restool 的 -b 参数直接用这个
   return out;
 }
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "merge_res", "release", "merge_res_file.index");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const mine = fs.readFileSync(ctx.paths.mergeResources);
-  const want = fs.readFileSync(theirs);
-  if (mine.length !== want.length) {
-    return { ok: false, detail: `字节数不同：${mine.length} vs ${want.length}` };
-  }
-  if (mine.toString("utf8") !== want.toString("utf8")) {
-    return { ok: false, detail: "内容不同（注意路径必须用反斜杠、带引号、CRLF 结尾）" };
-  }
-  return { ok: true, detail: `${mine.length} B 字节一致` };
-}

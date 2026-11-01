@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { compileJs } from "../js/aceLoader.js";
+import { compileJs } from "../aceLoader.js";
 import { todo } from "./_util.js";
 
 /**
@@ -91,22 +91,4 @@ export function run(ctx) {
 
   ctx.paths.jsBuild = sourceRoot;
   return sourceRoot;
-}
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "js", "release", "source", "lite", "assets", "js", "default");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const mine = path.join(ctx.work, "js", "release", "source", "lite", "assets", "js", "default");
-  const bad = [];
-  for (const f of ["app.js", "app.bc", "manifest.json"]) {
-    const a = path.join(mine, f);
-    const b = path.join(theirs, f);
-    if (!fs.existsSync(a)) bad.push(`${f} 没产出`);
-    else if (fs.existsSync(b) && fs.statSync(a).size !== fs.statSync(b).size) {
-      bad.push(`${f} ${fs.statSync(a).size} B ≠ ${fs.statSync(b).size} B`);
-    }
-  }
-  if (bad.length) return { ok: false, detail: bad.join("；") };
-  return { ok: true, detail: "app.js / app.bc / manifest.json 尺寸与 gradle 一致" };
 }

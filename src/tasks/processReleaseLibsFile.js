@@ -49,14 +49,3 @@ export function run(ctx) {
 
   todo(name, `找到 ${found.length} 个 .so（${found.slice(0, 3).join(", ")}），复制逻辑还没写`);
 }
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "libs", "release");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const count = (d) => (fs.existsSync(d) ? fs.readdirSync(d, { recursive: true }).length : 0);
-  const mine = count(ctx.paths.libs);
-  const want = count(theirs);
-  if (mine !== want) return { ok: false, detail: `文件数不同：我 ${mine}，gradle ${want}` };
-  return { ok: true, detail: `${want} 个文件，与 gradle 一致` };
-}

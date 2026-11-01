@@ -19,7 +19,7 @@
  *   图片转 .bin       ace-loader 的 ImageCoverterPlugin 负责，目前靠它自带的
  */
 
-export { findSdkRoot, resolveTools, resolveNode } from "./sdk.js";
+export { findSdkRoot, resolveTools, resolveNode } from "./core/sdk.js";
 
 export {
   readBin,
@@ -29,18 +29,18 @@ export {
   stripSignature,
   attachSignHeadTail,
   SIGN_HEAD_ASCII
-} from "./bin/index.js";
+} from "./binfile/index.js";
 
 export { packHap, unpackHap, hapForm } from "./hap/index.js";
 
 export { readZip, writeZip, crc32 } from "./zip/index.js";
 
-export { mergeProfile, processProfile, stringifyConfig } from "./config/profile.js";
+export { mergeProfile, processProfile, stringifyConfig } from "./profile.js";
 
 export { parseRTable, fillResourceIds } from "./resources/rtable.js";
 
 export { compileResources } from "./resources/restool.js";
 
-export { compileJs } from "./js/aceLoader.js";
+export { compileJs } from "./aceLoader.js";
 
 export { prepareSigning, signBin, signZip, parseP7b, loadPrivateKey, slicedSha256 } from "./sign/index.js";

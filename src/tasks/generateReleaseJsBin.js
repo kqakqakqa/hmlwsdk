@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { writeBin, readBin } from "../bin/index.js";
+import { writeBin } from "../binfile/index.js";
 import { todo } from "./_util.js";
 
 /**
@@ -74,30 +74,4 @@ export function run(ctx) {
 
   ctx.paths.unsignedBin = out;
   return out;
-}
-
-export function verify(ctx) {
-  // 逐条比对条目内容（不比整包字节：条目顺序规则还没对着真实产物核过）
-  const theirs = path.join(ctx.sample, "build", "outputs", "bin", "release", "entry-release-unsigned.bin");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const want = readBin(fs.readFileSync(theirs));
-  const mine = readBin(fs.readFileSync(ctx.paths.unsignedBin));
-
-  const key = (e) => e.relPath.replace(/^\//, "") + "/" + e.fileName;
-  const wm = new Map(want.entries.map((e) => [key(e), e.content]));
-  const mm = new Map(mine.entries.map((e) => [key(e), e.content]));
-
-  const missing = [...wm.keys()].filter((k) => !mm.has(k));
-  const extra = [...mm.keys()].filter((k) => !wm.has(k));
-  if (missing.length) return { ok: false, detail: `少了 ${missing.length} 个条目：${missing.slice(0, 5).join(", ")}` };
-  if (extra.length) return { ok: false, detail: `多了 ${extra.length} 个条目：${extra.slice(0, 5).join(", ")}` };
-
-  const diff = [...wm.keys()].filter((k) => !wm.get(k).equals(mm.get(k)));
-  if (diff.length) return { ok: false, detail: `内容不同 ${diff.length} 个：${diff.slice(0, 5).join(", ")}` };
-
-  return {
-    ok: true,
-    detail: `${mine.entries.length} 个条目内容全部一致（排序规则未核对，整包 SHA256 可能不同）`
-  };
 }

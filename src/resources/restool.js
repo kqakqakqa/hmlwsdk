@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 
-import { resolveTools } from "../sdk.js";
+import { resolveTools } from "../core/sdk.js";
 
 /**
  * 调 restool.exe 编译资源

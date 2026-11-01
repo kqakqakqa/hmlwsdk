@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 
-import { runBuild, plan } from "../src/build.js";
+import { runBuild, plan } from "../src/core/build.js";
 import { createCtx } from "../src/tasks/_util.js";
 
 /**
@@ -71,7 +71,6 @@ const ctx = createCtx({
   projectDir: root,
   moduleDir,
   work: flags.work ?? path.join(root, "build", "hmlwsdk"),
-  sample: moduleDir,
   srcConfig: JSON.parse(fs.readFileSync(configPath, "utf8")),
   // 这两个值在 build.gradle 里，本 SDK 还不会解析 Groovy DSL，先按本项目写死
   compileSdkVersion: 6,

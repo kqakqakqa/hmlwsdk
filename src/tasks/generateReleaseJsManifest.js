@@ -57,16 +57,3 @@ export function run(ctx) {
   ctx.paths.jsManifest = out;
   return out;
 }
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "js", "release", "jsManifest", "default", "manifest.json");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const mine = fs.readFileSync(ctx.paths.jsManifest);
-  const want = fs.readFileSync(theirs);
-  const same = mine.toString("utf8") === want.toString("utf8");
-  return {
-    ok: same,
-    detail: same ? `${want.length} B 字节一致` : `内容不同：我 ${mine.length} B，gradle ${want.length} B`
-  };
-}

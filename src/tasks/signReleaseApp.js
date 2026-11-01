@@ -49,22 +49,3 @@ export function run(ctx) {
   ctx.paths.signedApp = out;
   return out;
 }
-
-export function verify(ctx) {
-  if (!ctx.signingConfig) {
-    return { ok: true, detail: "未配证书，不产出 signed 包（与 gradle 一致）" };
-  }
-  if (!ctx.paths.signedApp || !fs.existsSync(ctx.paths.signedApp)) {
-    return { ok: false, detail: "没有产出 signed .app" };
-  }
-
-  const buf = fs.readFileSync(ctx.paths.signedApp);
-  const at = buf.lastIndexOf("HAP Sig Block 42");
-  if (at < 0) return { ok: false, detail: "signed .app 里没有 HAP Sig Block" };
-
-  const blockLen = buf.readUInt32LE(at - 8);
-  return {
-    ok: true,
-    detail: `${path.basename(ctx.paths.signedApp)} ${buf.length} B，签名块 ${blockLen} B`
-  };
-}

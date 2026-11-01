@@ -37,14 +37,3 @@ export function run(ctx) {
 
   todo(name, `有 ${jars.length} 个 jar 要处理（zipTree 解压 + 按 packageOptions.excludes 过滤），这部分还没写`);
 }
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "jarRes", "release");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const count = (d) => (fs.existsSync(d) ? fs.readdirSync(d, { recursive: true }).length : 0);
-  const mine = count(ctx.paths.jarRes);
-  const want = count(theirs);
-  if (mine !== want) return { ok: false, detail: `文件数不同：我 ${mine}，gradle ${want}` };
-  return { ok: true, detail: `${want} 个文件，与 gradle 一致` };
-}

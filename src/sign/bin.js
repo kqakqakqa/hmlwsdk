@@ -1,6 +1,6 @@
 import { slicedSha256 } from "./digest.js";
 import { buildSignedData } from "./cms.js";
-import { stripSignature, isSignedBin } from "../bin/read.js";
+import { stripSignature, isSignedBin } from "../binfile/read.js";
 
 /**
  * 给 .bin 追加签名块

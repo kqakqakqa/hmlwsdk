@@ -1,4 +1,4 @@
-import { DEPENDS, findTask } from "./tasks/index.js";
+import { DEPENDS, findTask } from "../tasks/index.js";
 
 /**
  * 按需构建 —— 给一个入口任务名，只跑它依赖的那些，不是把 18 个从头扫一遍

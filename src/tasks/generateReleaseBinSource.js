@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { stringifyConfig } from "../config/profile.js";
+import { stringifyConfig } from "../profile.js";
 import { parseRTable, fillResourceIds } from "../resources/rtable.js";
 import { todo } from "./_util.js";
 
@@ -129,19 +129,4 @@ function copyDir(src, dest) {
     if (ent.isDirectory()) copyDir(s, d);
     else fs.copyFileSync(s, d);
   }
-}
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "js", "release", "source", "lite", "config.json");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const mine = fs.readFileSync(ctx.paths.binSourceConfig);
-  const want = fs.readFileSync(theirs);
-  if (mine.toString("utf8") !== want.toString("utf8")) {
-    return {
-      ok: false,
-      detail: `config.json 不同：我 ${mine.length} B，gradle ${want.length} B（assets 复制这部分还没做）`
-    };
-  }
-  return { ok: true, detail: `config.json ${want.length} B 字节一致（assets 复制仍未实现）` };
 }

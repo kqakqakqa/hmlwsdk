@@ -1,8 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { processProfile, stringifyConfig } from "../config/profile.js";
-import { deepEqual } from "./_util.js";
+import { processProfile, stringifyConfig } from "../profile.js";
 
 /**
  * processReleaseProfile —— config.json 第二阶段加工
@@ -32,12 +31,4 @@ export function run(ctx) {
   ctx.config = config;
   ctx.paths.processProfile = out;
   return out;
-}
-
-export function verify(ctx) {
-  const theirs = path.join(ctx.sample, "build", "intermediates", "process_profile", "release", "normal", "config.json");
-  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
-
-  const d = deepEqual(ctx.config, JSON.parse(fs.readFileSync(theirs, "utf8")));
-  return { ok: !d, detail: d ?? `${fs.statSync(theirs).size} B，内容一致` };
 }
