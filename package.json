@@ -8,9 +8,7 @@
     "hmlwsdk": "bin/hmlwsdk.js"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./binfile": "./src/binfile/index.js",
-    "./hap": "./src/hap/index.js"
+    ".": "./src/index.js"
   },
   "scripts": {
     "build:hap": "node bin/hmlwsdk.js packageReleaseHap",
@@ -18,7 +16,8 @@
     "build:signedApp": "node bin/hmlwsdk.js signReleaseApp"
   },
   "dependencies": {
-    "jsrsasign": "^11.1.1"
+    "jsrsasign": "^11.1.1",
+    "pako": "^1.0.11"
   },
   "keywords": [
     "harmonyos",

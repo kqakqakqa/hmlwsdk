@@ -2,8 +2,9 @@
 import fs from "fs";
 import path from "path";
 
-import { runBuild, plan } from "../src/core/build.js";
-import { createCtx } from "../src/tasks/_util.js";
+import { runBuild, plan } from "../src/runBuild.js";
+import { createTaskContext } from "../src/createTaskContext.js";
+import { parseBuildGradle } from "../src/parseBuildGradle.js";
 
 /**
  * hmlwsdk 命令行入口
@@ -38,11 +39,11 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const target = args[0];
-const projectDir = args[1] ?? process.env.HMLW_PROJECT;
+const projectDir = args[1];
 
 if (!target) {
   console.error("用法: hmlwsdk <任务名> <工程目录> [--work 目录] [--plan]");
-  console.error("例如: hmlwsdk signReleaseApp E:/repo/hmlw/apps/devdemo/devdemo");
+  console.error("例如: hmlwsdk signReleaseApp /path/to/apps/devdemo/devdemo");
   console.error("      hmlwsdk --plan signReleaseApp");
   process.exit(1);
 }
@@ -54,7 +55,7 @@ if (flags.plan) {
 }
 
 if (!projectDir) {
-  console.error("缺少工程目录。可以写在第二个参数，或设环境变量 HMLW_PROJECT。");
+  console.error("缺少工程目录。用法: hmlwsdk <任务名> <工程目录>");
   process.exit(1);
 }
 
@@ -67,25 +68,26 @@ if (!fs.existsSync(configPath)) {
   process.exit(1);
 }
 
-const ctx = createCtx({
+// 版本号从工程自己的 build.gradle 读，不写死 —— 不同工程的值可能不一样
+const sdkVersions = parseBuildGradle(moduleDir);
+
+const taskContext = createTaskContext({
   projectDir: root,
   moduleDir,
   work: flags.work ?? path.join(root, "build", "hmlwsdk"),
   srcConfig: JSON.parse(fs.readFileSync(configPath, "utf8")),
-  // 这两个值在 build.gradle 里，本 SDK 还不会解析 Groovy DSL，先按本项目写死
-  compileSdkVersion: 6,
-  compatibleSdkVersion: 3,
+  ...sdkVersions,
   // 没给 p7b 就是"不签"，与 Gradle 没配 signingConfig 的行为一致
   signingConfig: flags.p7b
     ? { p7b: flags.p7b, p12: flags.p12, password: flags.p12pwd, keyFile: flags.key, certPath: flags.cert }
     : undefined
 });
 
-const r = runBuild(ctx, target);
+const r = runBuild(taskContext, target);
 
 if (!r.ok) {
   console.error(`\n构建失败，卡在 ${r.failedAt}`);
   process.exit(1);
 }
 
-console.log(`\n产物目录：${ctx.work}`);
+console.log(`\n产物目录：${taskContext.work}`);

@@ -1,3 +1,3 @@
-[submodule "vendor/ace-loader"]
-	path = vendor/ace-loader
+[submodule "src/ace-loader"]
+	path = src/ace-loader
 	url = https://github.com/kqakqakqa/ace-loader.git

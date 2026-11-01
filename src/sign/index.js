@@ -1,26 +1,26 @@
 import fs from "fs";
 
-import { parseP7b, nowSignTime } from "./p7b.js";
-import { loadPrivateKey } from "./key.js";
-import { HUAWEI_CHAIN_PEM, splitPemCerts } from "./certs.js";
-import { signBin } from "./bin.js";
-import { signZip } from "./zip.js";
+import { parseP7b, nowSignTime } from "./parseP7b.js";
+import { loadPrivateKey } from "./loadPrivateKey.js";
+import { HUAWEI_CHAIN_PEM, splitPemCerts } from "./loadCerts.js";
+import { signBin } from "./signBin.js";
+import { signZip } from "./signZip.js";
 
 export { signBin, signZip };
-export { parseP7b, nowSignTime } from "./p7b.js";
-export { loadPrivateKey, defaultCertDirs } from "./key.js";
-export { slicedSha256, zipContentDigest } from "./digest.js";
-export { buildSignedData, sortCertChain } from "./cms.js";
-export { stripZipSignature, readZipLayout } from "./zip.js";
+export { parseP7b, nowSignTime } from "./parseP7b.js";
+export { loadPrivateKey } from "./loadPrivateKey.js";
+export { slicedSha256, zipContentDigest } from "./computeDigest.js";
+export { buildSignedData, sortCertChain } from "./buildCms.js";
+export { stripZipSignature, readZipLayout } from "./signZip.js";
 
 /**
  * 把 signingConfig 变成签名要用的材料
  *
- * signingConfig 的形状：p7b 必给，私钥三选一
+ * signingConfig 的形状：p7b 必给，私钥二选一
  *   { p7b: "...", p12: "...", password: "..." }   PKCS#12
  *   { p7b: "...", keyFile: "private-pkcs8.pem" }   裸 PEM
- *   { p7b: "..." }                                 用 hap-sign-utils/cer 下的默认私钥
  * 另外可选 certPath 替换内置的华为根+中间证书链。
+ * 私钥没有默认路径、不读环境变量，必须显式给（--key 或 --p12 + --p12pwd）。
  *
  * @param {{p7b:string, p12?:string, password?:string, keyFile?:string, certPath?:string, signTime?:string}} config
  */
