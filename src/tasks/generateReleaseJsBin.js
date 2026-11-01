@@ -27,8 +27,8 @@ import { todo } from "./_util.js";
 export const name = "generateReleaseJsBin";
 export const produces = "bin/release/entry-release-unsigned.bin";
 
-/** 遍历目录，拆成 { fileName, relPath, content } 列表 */
-function collect(dir, root = dir, acc = []) {
+/** 遍历目录，拆成 { fileName, relPath, content } 列表（packageReleaseHap 也用它打文件树形态） */
+export function collect(dir, root = dir, acc = []) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) {
@@ -46,7 +46,7 @@ function collect(dir, root = dir, acc = []) {
 }
 
 /** 按路径深度、再按字典序排（照抄 hap-sign-utils 的 hapToBin，未验证） */
-function sortEntries(entries) {
+export function sortEntries(entries) {
   return entries.sort((a, b) => {
     const pa = (a.relPath + "/" + a.fileName).replace(/^\//, "");
     const pb = (b.relPath + "/" + b.fileName).replace(/^\//, "");

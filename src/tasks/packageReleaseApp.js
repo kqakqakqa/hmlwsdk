@@ -1,38 +1,151 @@
+import fs from "fs";
+import path from "path";
+
+import { writeZip, readZip } from "../zip/index.js";
 import { todo } from "./_util.js";
 
 /**
  * packageReleaseApp —— 把各模块的 hap 合成一个 .app
  *
- * Gradle 的动作：
- *   1. 收集各模块 PackageHap 的输出，按规则过滤
- *   2. 生成 pack.info 与 app.info 写进输出目录
- *   3. 把过滤后的 hap 复制到 outDir/app/*-unsigned.hap
- *   4. 有 EntryCard 时先跑一次 --mode res
- *   5. 调 java -jar 打包工具 --mode app --hap-path … --pack-info-path … --out-path … --force
- *   6. 失败抛 Package app failed
+ * 实测产物（devdemo release，同一份源码）：
+ *   build/outputs/app/release/
+ *     devdemo-release-unsigned.app   188260 B
+ *     pack.info                        1142 B   ← 同时打进 .app
+ *     appInfo.json                      203 B   ← 中间文件，不进 .app
  *
- * 过滤规则是关键（PackageApp.getHapPathFiles）：
- *   非 .hap 的跳过；文件名含 -bin- 且 deviceType 含 liteWearable 的也跳过。
- *   所以 .bin 形态的 hap 进不了 .app，只有文件树形态进得去 —— 这正好解释了
- *   为什么进 app 的那个 hap 与 entry-release-lite.hap 字节数完全相同。
+ * .app 内部只有两个条目，都是 deflate 压缩（method=8）：
+ *   entry-release-lite.hap   2304041 B   ← 注意去掉了 "-unsigned"
+ *   pack.info                   1142 B
  *
- * 输出：outputs/app/release/<工程名>-release-unsigned.app
+ * 过滤规则（PackageApp.getHapPathFiles）：
+ *   非 .hap 的跳过；文件名含 "-bin-" 且 deviceType 含 liteWearable 的也跳过。
+ *   所以 .bin 形态的 hap 进不了 .app，只有文件树形态进得去。
+ *   实测印证：.app 里那份 hap 的字节数与 entry-release-lite-unsigned.hap 完全相同。
  */
 
 export const name = "packageReleaseApp";
-export const produces = "app/release/<工程名>-release-unsigned.app";
+export const produces = "app/release/<工程名>-release-unsigned.app + pack.info + appInfo.json";
 
 export function run(ctx) {
-  todo(
-    name,
-    "要生成 pack.info / app.info，过滤掉 -bin- 形态的 hap，再打成 .app 容器。" +
-      "输入是各模块文件树形态的 hap，而那个形态目前也还没实现（见 packageReleaseHap）"
+  if (!ctx.paths.treeHap) {
+    todo(name, "缺少文件树形态的 hap —— .app 只收文件树形态，.bin 形态会被过滤掉。必须先跑 packageReleaseHap");
+  }
+  if (!ctx.config) todo(name, "缺少 ctx.config");
+
+  const outDir = path.join(ctx.work, "app", "release");
+  fs.mkdirSync(outDir, { recursive: true });
+
+  const hapName = path.basename(ctx.paths.treeHap).replace("-unsigned", "");
+  const hapBuf = fs.readFileSync(ctx.paths.treeHap);
+  const moduleName = hapName.replace(/\.hap$/, "");
+
+  // pack.info：summary（来自 config）+ packages（来自 hap 文件名）
+  const packInfoText = JSON.stringify(buildPackInfo(ctx.config, moduleName), null, 4);
+  fs.writeFileSync(path.join(outDir, "pack.info"), packInfoText);
+
+  // appInfo.json：只记录每个包的名字和大小，是中间文件，不进 .app
+  const appInfoText = JSON.stringify(
+    {
+      packages: [
+        {
+          moduleType: ctx.config.module?.distro?.moduleType ?? "entry",
+          moduleName: ctx.config.module?.distro?.moduleName ?? "entry",
+          packageName: moduleName,
+          packageSize: String(hapBuf.length)
+        }
+      ]
+    },
+    null,
+    4
   );
+  fs.writeFileSync(path.join(outDir, "appInfo.json"), appInfoText);
+
+  // .app 本体：两个条目，都 deflate 压缩
+  const appBuf = writeZip(
+    [
+      { name: hapName, content: hapBuf },
+      { name: "pack.info", content: Buffer.from(packInfoText) }
+    ],
+    { compress: true }
+  );
+
+  const projectName = ctx.config.app.bundleName.split(".").pop();
+  const appPath = path.join(outDir, `${projectName}-release-unsigned.app`);
+  fs.writeFileSync(appPath, appBuf);
+
+  ctx.paths.app = appPath;
+  ctx.paths.packInfo = path.join(outDir, "pack.info");
+  return appPath;
+}
+
+/**
+ * 从 config 拼出 pack.info
+ *
+ * 字段顺序照抄实测产物：deviceType → abilities → distro → apiVersion。
+ * abilities 只保留 name 和 label，icon / type / homeAbility / iconId / labelId 都丢掉。
+ */
+function buildPackInfo(config, moduleName) {
+  const m = config.module ?? {};
+  const distro = m.distro ?? {};
+
+  return {
+    summary: {
+      app: {
+        bundleName: config.app.bundleName,
+        version: config.app.version
+      },
+      modules: [
+        {
+          deviceType: m.deviceType ?? ["liteWearable"],
+          abilities: (m.abilities ?? []).map((ab) => ({ name: ab.name, label: ab.label })),
+          // 重新构造，不能直接引用 config 里的对象 —— 键序必须和 Gradle 一致：
+          //   distro     moduleType → deliveryWithInstall → moduleName
+          //   apiVersion compatible → releaseType → target
+          distro: {
+            moduleType: distro.moduleType ?? "entry",
+            deliveryWithInstall: distro.deliveryWithInstall ?? true,
+            moduleName: distro.moduleName ?? "entry"
+          },
+          apiVersion: {
+            compatible: config.app.apiVersion.compatible,
+            releaseType: config.app.apiVersion.releaseType,
+            target: config.app.apiVersion.target
+          }
+        }
+      ]
+    },
+    packages: [
+      {
+        deviceType: m.deviceType ?? ["liteWearable"],
+        moduleType: distro.moduleType ?? "entry",
+        deliveryWithInstall: distro.deliveryWithInstall ?? true,
+        name: moduleName
+      }
+    ]
+  };
 }
 
 export function verify(ctx) {
-  const theirs = ctx.appSample
-    ? `${ctx.appSample}/outputs/app/release`
-    : "(没有配置 app 样本目录)";
-  return { ok: false, detail: `还没实现。对照物应该在 ${theirs}` };
+  if (!ctx.paths.app) return { ok: false, detail: "没有产出 .app" };
+
+  const appRoot = ctx.appSample ?? path.join(ctx.projectDir, "build", "outputs", "app", "release");
+  const projectName = ctx.config.app.bundleName.split(".").pop();
+  const theirs = path.join(appRoot, `${projectName}-release-unsigned.app`);
+  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
+
+  const want = readZip(fs.readFileSync(theirs));
+  const mine = readZip(fs.readFileSync(ctx.paths.app));
+
+  if (mine.length !== want.length) return { ok: false, detail: `条目数不同：${mine.length} vs ${want.length}` };
+
+  const wm = new Map(want.map((e) => [e.name, e.content]));
+  const bad = [];
+  for (const e of mine) {
+    const w = wm.get(e.name);
+    if (!w) bad.push(`${e.name} 多了`);
+    else if (!w.equals(e.content)) bad.push(`${e.name} 内容不同（我 ${e.content.length} B，gradle ${w.length} B）`);
+  }
+  if (bad.length) return { ok: false, detail: bad.join("；") };
+
+  return { ok: true, detail: `${mine.length} 个条目内容一致：${mine.map((e) => e.name).join(", ")}` };
 }

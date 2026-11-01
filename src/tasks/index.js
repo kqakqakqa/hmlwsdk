@@ -50,7 +50,8 @@ export const TASKS = [
   packageReleaseApp,
   signReleaseApp,
 
-  // 源码上传链，2 步
+  // 源码上传链，2 步 —— 不打算做，见各自文件头的说明。
+  // 保留在这里只是让任务清单和报告对得上，任何出包入口都不会带出它们。
   validateUploadState,
   zipSources
 ];

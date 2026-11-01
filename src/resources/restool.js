@@ -8,18 +8,26 @@ import { resolveTools } from "../sdk.js";
  * 调 restool.exe 编译资源
  *
  * 实测参数（对应 Gradle 的 compileDebugResources）：
- *   -i  资源目录（标准结构 resources/base/media/...）
- *   -b  variants 目录，实测传 entry/src/main
+ *   -i  **模块根** src/main —— 不是 src/main/resources。传 resources 目录会报
+ *       "Error: config.json ref:'$media:icon' don't be defined"
+ *       （restool 要在 -i 下面自己找 resources/base/...，实测 restool 1.022）
  *   -j  加工后的 config.json
  *   -p  bundleName
- *   -o  输出目录
+ *   -o  输出目录（必须先存在，否则报 "not directory or exists"）
  *   -r  资源头文件路径，必须以 .java 结尾；传 .txt 会报 Invalid header file
  *   -m  模块名
  *   -f  输出目录存在时强删
+ *   -z  压缩图片（opts.compressImage）
  *
- * 实测结果（apps/_empty/_empty，restool 1.028 vs gradle 当时的 1.022）：
- *   R.txt            73 B，SHA256 完全一致
- *   resources.index  337 B，仅版本号字符串不同，其余 336 字节相同
+ * 没有 -b：api6 的 restool 1.022 不支持（传了只输出
+ *   "Warning: unsupport parameter: 98"，98 是 'b' 的 ASCII），它只存在于 api7。
+ *
+ * 实测结果（apps/_empty/_empty）：
+ *   仓库这份 restool -v 报 Restool 1.022，与 Gradle 当时同版本
+ *   R.txt            73 B，SHA256 651EFBDB…，与 Gradle 产物完全一致
+ *   resources.index  337 B，SHA256 08F3CD66…，与 Gradle 产物完全一致
+ *   icon.png         加 -z 后 6320 B / SHA256 D8734140…，同样一致
+ *                    （不加 -z 是源码原图 6790 B）
  *
  * @returns {{ok:boolean, code:number, stdout:string, stderr:string, outDir:string, indexFile:string, rTxtFile:string, headerFile:string}}
  */
@@ -34,7 +42,9 @@ export function compileResources(opts) {
   const headerFile = path.join(headerDir, "ResourceTable.java");
 
   const args = [
-    "-i", opts.resourcesDir,
+    // 名字就叫 moduleRoot：-i 要的是模块根 src/main，不是 src/main/resources。
+    // 早先叫 resourcesDir，名字本身就在误导（实测踩过一次）。
+    "-i", opts.moduleRoot,
     "-j", opts.configPath,
     "-p", opts.bundleName,
     "-o", outDir,
@@ -42,6 +52,9 @@ export function compileResources(opts) {
     "-m", opts.moduleName ?? "entry"
   ];
 
+  // -b 只有 api7 的 restool 认。api6 的 1.022 传了只会输出
+  // "Warning: unsupport parameter: 98"（98 = 'b'）并被忽略，产物不受影响。
+  // 这个开关留着给换 api7 restool 时用，liteWearable 默认不传。
   if (opts.variantsDir) args.push("-b", opts.variantsDir);
   if (opts.force !== false) args.push("-f");
   if (opts.incremental) args.push("-c");

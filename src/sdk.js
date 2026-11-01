@@ -52,45 +52,36 @@ export function findSdkRoot(explicit) {
 }
 
 /**
- * 工具路径。
+ * 工具路径
  *
- * 全部优先用仓库内的 vendor 副本 —— 都从 Huawei SDK 2.2.0 (api6) 复制进来：
- *   vendor/ace-loader/                JS 构建链（git submodule，node_modules 需 npm install）
- *   vendor/java-build-tools/          restool.exe 及属性表
- *   vendor/js-build-tools/binary-tools/  hmos_haptobin_tool.jar（20 KB，实际已用纯 JS 替代）
- *   vendor/toolchains/                hapsigntoolv2.jar
+ * 现在只剩两个真外部依赖，都优先用仓库内的 vendor 副本（取自 Huawei SDK 2.2.0 / api6）：
+ *   vendor/ace-loader/         JS 构建链（git submodule，node_modules 需自己 npm install）
+ *   vendor/java-build-tools/   restool.exe
  *
- * 四个都在 vendor 里时，完全不碰系统 SDK（root 为 null）；缺哪个才去 findSdkRoot 拿。
+ * 两个都在 vendor 里时完全不碰系统 SDK（root 为 null）；缺哪个才去 findSdkRoot 拿。
+ *
+ * 已经不再需要的：hmos_haptobin_tool.jar（打 .bin 用 writeBin）、hapsigntoolv2.jar
+ * （签名走 src/sign 的纯 JS）、c2abc.exe / zidl.exe / lib 下三个 jar（Java 编译链），
+ * 这些文件已经从仓库删掉了。
  */
 export function resolveTools(sdkRoot) {
   const H = {
     ace: path.resolve(HERE, "..", "vendor", "ace-loader"),
-    java: path.resolve(HERE, "..", "vendor", "java-build-tools"),
-    js: path.resolve(HERE, "..", "vendor", "js-build-tools"),
-    tc: path.resolve(HERE, "..", "vendor", "toolchains")
+    java: path.resolve(HERE, "..", "vendor", "java-build-tools")
   };
 
   const has = {
     ace: fs.existsSync(path.join(H.ace, "webpack.lite.config.js")),
-    restool: fs.existsSync(path.join(H.java, "restool.exe")),
-    haptobin: fs.existsSync(path.join(H.js, "binary-tools", "hmos_haptobin_tool.jar")),
-    hapsign: fs.existsSync(path.join(H.tc, "hapsigntoolv2.jar"))
+    restool: fs.existsSync(path.join(H.java, "restool.exe"))
   };
 
-  const complete = has.ace && has.restool && has.haptobin && has.hapsign;
+  const complete = has.ace && has.restool;
   const root = sdkRoot ?? (complete ? null : findSdkRoot());
 
   return {
     root: root ?? "(全部来自 vendor，未使用系统 SDK)",
     restool: has.restool ? `${toSlash(H.java)}/restool.exe` : `${root}/java/build-tools/restool.exe`,
-    haptobin: has.haptobin
-      ? `${toSlash(H.js)}/binary-tools/hmos_haptobin_tool.jar`
-      : `${root}/js/build-tools/binary-tools/hmos_haptobin_tool.jar`,
-    aceLoader: has.ace ? toSlash(H.ace) : `${root}/js/build-tools/ace-loader`,
-    hapsign: has.hapsign ? `${toSlash(H.tc)}/hapsigntoolv2.jar` : `${root}/toolchains/lib/hapsigntoolv2.jar`,
-    jerrySnapshot: has.ace
-      ? `${toSlash(H.ace)}/bin/jerry-snapshot.exe`
-      : `${root}/js/build-tools/ace-loader/bin/jerry-snapshot.exe`
+    aceLoader: has.ace ? toSlash(H.ace) : `${root}/js/build-tools/ace-loader`
   };
 }
 

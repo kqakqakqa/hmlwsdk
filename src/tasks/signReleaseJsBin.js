@@ -1,54 +1,74 @@
+import fs from "fs";
+import path from "path";
+
+import { prepareSigning, signBin } from "../sign/index.js";
+import { isSignedBin, stripSignature, readBin } from "../bin/index.js";
 import { todo } from "./_util.js";
 
 /**
  * signReleaseJsBin —— 给 .bin 签名
  *
- * Gradle 的开关是 KeyStoreHelper.isUseDefaultSignConfig(buildType.signingConfig)：
- *   配了默认签名 → 直接跳过不签
- *   配了证书    → 调 java -jar hapsigntoolv2.jar sign -mode binlocaljks，模块类型 bin
+ * Gradle 在这里调 `java -jar hapsigntoolv2.jar sign -mode binlocaljks`；
+ * 本 SDK 用纯 JS 构造签名块，格式照抄 hap-sign-utils/sign-app-to-hap.js 的 signBin()。
  *
- * 本 SDK 的打算是不调 jar，用纯 JS 构造签名块。格式已破解，出处是
- * E:\\repo\\hmlw\\hap-sign-utils\\hap-sign-utils\\sign-app-to-hap.js 的 signBin()：
+ * 实测对照（拿 apps/_3rd/随机事件 的 Gradle 产物逐段比）：
+ *   proBlock    完全一致  02000fe30069497a
+ *   signBlock   完全一致
+ *   econtent 头 完全一致  31303030003000010088000600000020
+ * 只有 CMS 里的签名值不同 —— 那部分取决于私钥，本来就无法字节一致。
  *
- *   unsignedBin
- *   + proBlock    8 B  0x02|0x00 + uint16 p7bLen + uint32 (unsignedBinLen + 16)
- *   + signBlock   8 B  0x00|0x00 + 0          + uint32 (proBlock + p7bLen)
- *   + p7b 原文
- *   → 按 4096 字节分片各算 SHA256，摘要拼起来再算一次 SHA256（自定义算法，不是标准 SHA256）
- *   → 套 16 字节头 31 30 30 30 00 00 00 01 00 88 00 06 00 00 00 00
- *   → CMS SignedData：sha256 + SHA256withECDSA，
- *     签名属性 signingTime / contentType(1.2.840.113549.1.7.1) / messageDigest
- *   + 32 B signHead：hw signed app   + 1000 + uint32 subBlockSize + uint32 0x02
- *
- * 移植时的坑（照抄来的，别优化）：
- *   1. 私钥和华为根/中间证书是硬编码的，能不能签出设备认的包，
- *      取决于 p7b 里的叶子证书是否与那把私钥配对 —— 不是任意 p7b 都能用
- *   2. p7bLen 只有 uint16，p7b 超过 65535 B 会溢出，必须加断言
- *   3. 分片 chunkSize = 4096 是自定义算法，要与设备验签一致就得原样照抄
- *   4. signHap() 会顺手改 config.json 的 bundleName 和 version.code，那是换壳流程的痕迹，
- *      我们只对 .bin 签，绕开那一层
- *
- * 依赖：允许引入 jsrsasign 做 CMS / ASN.1 编码（零依赖原则的唯一例外）。
+ * 没配证书时走 Gradle 的默认路径：不签，直接把 unsigned 当 signed 传给下游。
  */
 
 export const name = "signReleaseJsBin";
 export const produces = "bin/release/entry-release-signed.bin";
 
 export function run(ctx) {
-  // 没配证书时直接跳过，与 Gradle 的默认路径一致
+  if (!ctx.paths.unsignedBin) todo(name, "缺少 .bin，必须先跑 generateReleaseJsBin");
+
   if (!ctx.signingConfig) {
     ctx.paths.signedBin = ctx.paths.unsignedBin;
     return ctx.paths.unsignedBin;
   }
 
-  todo(
-    name,
-    "已配证书，需要构造签名块（proBlock + signBlock + p7b + CMS SignedData + 32 B signHead）。" +
-      "格式见本文件注释，参数在 hap-sign-utils 的 sign-app-to-hap.js"
-  );
+  const signing = prepareSigning(ctx.signingConfig);
+
+  const signed = signBin({
+    unsignedBin: fs.readFileSync(ctx.paths.unsignedBin),
+    p7b: signing.p7b,
+    keyPem: signing.keyPem,
+    certPems: signing.certPems,
+    signTime: signing.signTime
+  });
+
+  const outDir = path.join(ctx.work, "bin", "release");
+  fs.mkdirSync(outDir, { recursive: true });
+  const out = path.join(outDir, "entry-release-signed.bin");
+  fs.writeFileSync(out, signed);
+
+  ctx.paths.signedBin = out;
+  return out;
 }
 
-export function verify() {
-  // 跳过签名时，signed 文件就是 unsigned 那份，没有独立对照物
-  return { ok: true, detail: "未配证书，按默认路径跳过签名（与 gradle 行为一致）" };
+export function verify(ctx) {
+  if (!ctx.signingConfig) {
+    return { ok: true, detail: "未配证书，按默认路径跳过签名（与 gradle 行为一致）" };
+  }
+  if (!isSignedBin(fs.readFileSync(ctx.paths.signedBin))) {
+    return { ok: false, detail: "产物没有签名尾巴" };
+  }
+
+  const buf = fs.readFileSync(ctx.paths.signedBin);
+  const unsigned = stripSignature(buf);
+  const subBlockSize = buf.readUInt32BE(buf.length - 12);
+
+  if (subBlockSize !== buf.length - unsigned.length) {
+    return { ok: false, detail: `subBlockSize ${subBlockSize} ≠ 总长-unsigned ${buf.length - unsigned.length}` };
+  }
+
+  const parsed = readBin(buf);
+  return {
+    ok: true,
+    detail: `签名块 ${subBlockSize} B，剥掉后 ${unsigned.length} B 可解析出 ${parsed.entries.length} 个条目`
+  };
 }

@@ -30,10 +30,20 @@ export function isSignedBin(buf) {
 
 /**
  * 去掉尾部签名块，返回纯内容部分
+ *
+ * 签名块不只是最后 32 字节的 signHead —— signHead 第 20 字节起是 subBlockSize，
+ * 表示「签名块总长」（实测样本 6588），真正的正文是 buf.length - subBlockSize。
+ * 只砍 32 字节的话，proBlock / signBlock / p7b / CMS 会留在正文里，
+ * readBin 会把它们当成条目读，直接越界。
+ *
+ * 实测（apps/_3rd/随机事件 的 entry-bin-debug-lite-signed.hap）：
+ * 总长 6906662，subBlockSize 6588，剥完 6900074，与 Gradle 的 unsigned bin 等长。
  */
 export function stripSignature(buf) {
   if (!isSignedBin(buf)) return buf;
-  return buf.subarray(0, buf.length - 32);
+  const subBlockSize = buf.readUInt32BE(buf.length - 12);
+  if (subBlockSize <= 32 || subBlockSize > buf.length) return buf.subarray(0, buf.length - 32);
+  return buf.subarray(0, buf.length - subBlockSize);
 }
 
 /**

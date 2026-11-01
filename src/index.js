@@ -11,9 +11,11 @@
  *   资源编译          restool 对比 gradle 产物                        R.txt 字节一致
  *                                                                    index 仅版本号不同
  *   JS 编译           node + ace-loader 独立跑通                      COMPILE RESULT:SUCCESS
+ *   .bin 签名         与 gradle 产物逐段对比                          proBlock/signBlock/
+ *                                                                    econtent 头完全一致
+ *   .app 签名         产出的包交给 hapsigntoolv2 的 verify             Verify success
  *
  * 还没做的：
- *   签名              需要证书 + hapsigntoolv2 参数，未验证
  *   图片转 .bin       ace-loader 的 ImageCoverterPlugin 负责，目前靠它自带的
  */
 
@@ -40,3 +42,5 @@ export { parseRTable, fillResourceIds } from "./resources/rtable.js";
 export { compileResources } from "./resources/restool.js";
 
 export { compileJs } from "./js/aceLoader.js";
+
+export { prepareSigning, signBin, signZip, parseP7b, loadPrivateKey, slicedSha256 } from "./sign/index.js";

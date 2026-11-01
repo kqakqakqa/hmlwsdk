@@ -86,3 +86,21 @@ export function stringifyConfig(config) {
       )
   );
 }
+
+/**
+ * 紧凑版序列化 —— 打进文件树形态 hap 的那个 config.json
+ *
+ * 实测（devdemo release）：hap 里的 config.json 是 1935 B 单行，
+ * 而 source/lite 里的是 3422 B 缩进版。两者内容一样，只是排版不同。
+ *
+ * 单行版的格式特征是「冒号后一个空格、逗号后没有空格」：
+ *   {"app": {"apiVersion": {"compatible": 3,"releaseType": "Release",...
+ *
+ * 那个 replace 只影响键值分隔符：JSON 字符串内部的引号一定会被转义成 \"，
+ * 所以未转义的 `":` 只可能是「键结束 + 冒号」，不会误伤值里的内容。
+ */
+export function stringifyConfigMinified(config) {
+  return JSON.stringify(config)
+    .replace(/[^\x00-\x7F]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"))
+    .replace(/":/g, '": ');
+}

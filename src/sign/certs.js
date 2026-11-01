@@ -1,0 +1,57 @@
+/**
+ * 华为根证书 + 开发者关系中间证书
+ *
+ * 设备验签看的是完整链：根 → 中间 → 叶子。叶子证书不内置，从 p7b 的
+ * bundle-info.development-certificate / distribution-certificate 里取，
+ * 这两张是链上固定的前两级，所有 app 共用。
+ *
+ * 出处：hap-sign-utils/sign-app-to-hap.js 第 9 行的 cerRoot 常量。
+ * 实测与 apps/_inactive/poweroftwo/res/sign-app/*.cer 里的前两张完全一致
+ * （subject 分别是 "Huawei CBG Root CA G2" 和 "Huawei CBG Developer Relations CA G2"）。
+ *
+ * 顺序不能反：CMS 里证书按叶子 → 中间 → 根排列，sortCertChain 会自己排。
+ */
+export const HUAWEI_CHAIN_PEM = [
+  `-----BEGIN CERTIFICATE-----
+MIICGjCCAaGgAwIBAgIIShhpn519jNAwCgYIKoZIzj0EAwMwUzELMAkGA1UEBhMC
+Q04xDzANBgNVBAoMBkh1YXdlaTETMBEGA1UECwwKSHVhd2VpIENCRzEeMBwGA1UE
+AwwVSHVhd2VpIENCRyBSb290IENBIEcyMB4XDTIwMDMxNjAzMDQzOVoXDTQ5MDMx
+NjAzMDQzOVowUzELMAkGA1UEBhMCQ04xDzANBgNVBAoMBkh1YXdlaTETMBEGA1UE
+CwwKSHVhd2VpIENCRzEeMBwGA1UEAwwVSHVhd2VpIENCRyBSb290IENBIEcyMHYw
+EAYHKoZIzj0CAQYFK4EEACIDYgAEWidkGnDSOw3/HE2y2GHl+fpWBIa5S+IlnNrs
+GUvwC1I2QWvtqCHWmwFlFK95zKXiM8s9yV3VVXh7ivN8ZJO3SC5N1TCrvB2lpHMB
+wcz4DA0kgHCMm/wDec6kOHx1xvCRo0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0T
+AQH/BAUwAwEB/zAdBgNVHQ4EFgQUo45a9Vq8cYwqaiVyfkiS4pLcIAAwCgYIKoZI
+zj0EAwMDZwAwZAIwMypeB7P0IbY7c6gpWcClhRznOJFj8uavrNu2PIoz9KIqr3jn
+BlBHJs0myI7ntYpEAjBbm8eDMZY5zq5iMZUC6H7UzYSix4Uy1YlsLVV738PtKP9h
+FTjgDHctXJlC5L7+ZDY=
+-----END CERTIFICATE-----`,
+  `-----BEGIN CERTIFICATE-----
+MIIDATCCAoigAwIBAgIIXmuDXbWpOB8wCgYIKoZIzj0EAwMwUzELMAkGA1UEBhMC
+Q04xDzANBgNVBAoMBkh1YXdlaTETMBEGA1UECwwKSHVhd2VpIENCRzEeMBwGA1UE
+AwwVSHVhd2VpIENCRyBSb290IENBIEcyMB4XDTIwMDcwOTAyMDQyNFoXDTMwMDcw
+NzAyMDQyNFowYjELMAkGA1UEBgwCQ04xDzANBgNVBAoMBkh1YXdlaTETMBEGA1UE
+CwwKSHVhd2VpIENCRzEtMCsGA1UEAwwkSHVhd2VpIENCRyBEZXZlbG9wZXIgUmVs
+YXRpb25zIENBIEcyMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE65LdoIZh1hlpZ2gP
+bJ6gPhHsvYSRe22KETgdqeVeYnrbRHI9wsPT6RGYS+pU4mPl6wxzgDMqN6SY/BoZ
+luhkE1PzaHoPoNIWIq0O33hpyKyyYwAacIUEjYurkw1E9r9no4IBGDCCARQwHwYD
+VR0jBBgwFoAUo45a9Vq8cYwqaiVyfkiS4pLcIAAwHQYDVR0OBBYEFNtek7Ij6NDk
+/nF6Zumkc0dbf/NeMEYGA1UdIAQ/MD0wOwYEVR0gADAzMDEGCCsGAQUFBwIBFiVo
+dHRwOi8vY3BraS1jYXdlYi5odWF3ZWkuY29tL2Nwa2kvY3BzMBIGA1UdEwEB/wQI
+MAYBAf8CAQAwDgYDVR0PAQH/BAQDAgEGMGYGA1UdHwRfMF0wW6BZoFeGVWh0dHA6
+Ly9jcGtpLWNhd2ViLmh1YXdlaS5jb20vY3BraS9zZXJ2bGV0L2NybEZpbGVEb3du
+LmNybD9jZXJ0eXBlPTEwJi9yb290X2cyX2NybC5jcmwwCgYIKoZIzj0EAwMDZwAw
+ZAIwWO1X5q2MdfpR1Q237GpUHGbL1C13rGyFg2p3AYo44FpZ2/A9ss0wOHKM4KDl
+ZPqdAjBLkf8NPZy7KVog98+iCTLq35DJ2ZVxkCxknA9YhiHVyXf4HPm4JlT7rW7o
+Q+FzM3c=
+-----END CERTIFICATE-----`
+].join("\n");
+
+/**
+ * 把一段文本里所有 PEM 证书拆出来（顺序原样）
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function splitPemCerts(text) {
+  return text.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+}

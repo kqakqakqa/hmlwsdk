@@ -1,31 +1,34 @@
-import { todo } from "./_util.js";
-
 /**
  * validateUploadState —— 上架前检查：工程里不许有签名证书
  *
- * 它没有 @OhosTask 注解，是 root 工程上的普通 DefaultTask。
+ * status: not planned
  *
- * Gradle 的动作：
+ * 为什么不做：
+ * 它属于「源码上传链」（zipSources → validateUploadState），是给华为应用市场
+ * 交源码包时用的检查，跟出包完全无关。而且它不是 @OhosTask，只是 root 工程上的
+ * 普通 DefaultTask。
+ *
+ * 要实现得先读 build.gradle 的 signingConfigs，那需要 Groovy DSL 解析器 ——
+ * 本 SDK 的定位是出包，不打算为了一个上架检查去写 Groovy 解析。
+ *
+ * Gradle 原本的动作（留档）：
  *   1. 遍历所有工程的 signingConfigs
  *   2. 逐个用 KeyStoreHelper.isUseDefaultSignConfig 判断
  *   3. 只要有一个不是默认配置，就抛异常：
  *      "Packaging source files should not have signing configurations."
  *
- * 逻辑很简单，但我们的 SDK 目前还读不了 build.gradle 里的 signingConfigs
- * （没有 Groovy DSL 解析器），所以没法实现。
+ * 保留这个文件只是让任务清单和 doc/gradle-build-report.html 的卡片对得上。
+ * 没有任何出包入口会走到它（DEPENDS 里只有 zipSources 依赖它）。
  */
 
 export const name = "validateUploadState";
-export const produces = "无产物，纯校验";
+export const status = "not planned";
+export const produces = "无";
 
 export function run() {
-  todo(
-    name,
-    "要读各模块 build.gradle 的 signingConfigs 并逐个判断是否默认配置，" +
-      "需要先有 build.gradle 的解析逻辑"
-  );
+  return null;
 }
 
 export function verify() {
-  return { ok: false, detail: "还没实现，依赖 build.gradle 解析" };
+  return { ok: true, detail: "not planned" };
 }

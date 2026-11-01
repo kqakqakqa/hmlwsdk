@@ -12,6 +12,13 @@ import { createCtx } from "../src/tasks/_util.js";
  *   node bin/hmlwsdk.js packageReleaseApp <工程目录> --work <中间产物目录>
  *   node bin/hmlwsdk.js --plan signReleaseApp        只列要跑哪些任务，不执行
  *
+ * 签名相关参数（不给就跳过签名，出 unsigned 包）：
+ *   --p7b <file>      必给，HarmonyOS profile
+ *   --p12 <file>      PKCS#12 私钥库，配合 --p12pwd
+ *   --p12pwd <pwd>    p12 密码
+ *   --key <file>      直接给 PEM 私钥（和 --p12 二选一）
+ *   --cert <file>     替换内置的华为根+中间证书链
+ *
  * 工程目录指模块目录的上一级，例如 apps/devdemo/devdemo（里面有 entry/）。
  */
 
@@ -22,6 +29,11 @@ const args = [];
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--plan") flags.plan = true;
   else if (argv[i] === "--work") flags.work = argv[++i];
+  else if (argv[i] === "--p7b") flags.p7b = argv[++i];
+  else if (argv[i] === "--p12") flags.p12 = argv[++i];
+  else if (argv[i] === "--p12pwd") flags.p12pwd = argv[++i];
+  else if (argv[i] === "--key") flags.key = argv[++i];
+  else if (argv[i] === "--cert") flags.cert = argv[++i];
   else args.push(argv[i]);
 }
 
@@ -63,7 +75,11 @@ const ctx = createCtx({
   srcConfig: JSON.parse(fs.readFileSync(configPath, "utf8")),
   // 这两个值在 build.gradle 里，本 SDK 还不会解析 Groovy DSL，先按本项目写死
   compileSdkVersion: 6,
-  compatibleSdkVersion: 3
+  compatibleSdkVersion: 3,
+  // 没给 p7b 就是"不签"，与 Gradle 没配 signingConfig 的行为一致
+  signingConfig: flags.p7b
+    ? { p7b: flags.p7b, p12: flags.p12, password: flags.p12pwd, keyFile: flags.key, certPath: flags.cert }
+    : undefined
 });
 
 const r = runBuild(ctx, target);

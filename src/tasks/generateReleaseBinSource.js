@@ -56,6 +56,11 @@ export function run(ctx) {
     config.module.deviceType = ["liteWearable"];
   }
 
+  // 写回 ctx.config —— packageReleaseHap 打文件树形态时用的就是它。
+  // 不写回的话那边拿到的是没回填 iconId / labelId 的版本，
+  // 实测 config.json 少 39 B（module.abilities[0].iconId 缺失）。
+  ctx.config = config;
+
   const configOut = path.join(sourceRoot, "config.json");
   fs.writeFileSync(configOut, stringifyConfig(config));
   ctx.paths.binSource = sourceRoot;

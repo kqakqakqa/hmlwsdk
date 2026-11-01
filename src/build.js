@@ -64,6 +64,15 @@ export function runBuild(ctx, target, log = console.log) {
 
   for (const name of order) {
     const task = findTask(name);
+
+    // 明确不做的任务（status = "not planned"）直接跳过，不执行也不计时。
+    // 它们留在依赖图里只是为了让任务清单和报告对得上，出包入口不会带出它们。
+    if (task.status === "not planned") {
+      results.push({ name, ok: true, skipped: true });
+      log(`- ${name.padEnd(32)} not planned`);
+      continue;
+    }
+
     const t0 = Date.now();
     try {
       task.run(ctx);

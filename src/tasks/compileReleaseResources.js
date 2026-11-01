@@ -8,12 +8,13 @@ import { todo } from "./_util.js";
  * compileReleaseResources —— 调 restool 编译资源
  *
  * 实测参数（见 src/resources/restool.js）：
- *   -i 资源目录 -b variantsDir -j config.json -p bundleName
- *   -o 输出目录 -r ResourceTable.java -m entry -f
+ *   -i 模块根 src/main -j config.json -p bundleName -o 输出目录
+ *   -r ResourceTable.java -m entry -f -z
  *
- * 实测对照（apps/_empty/_empty，本机 restool 1.028 vs gradle 当时 1.022）：
- *   R.txt            字节一致
- *   resources.index  仅偏移 12 的版本号字节不同
+ * 实测对照（apps/_empty/_empty，restool -v 报 1.022，与 Gradle 当时同版本）：
+ *   R.txt            73 B，SHA256 651EFBDB…，字节一致
+ *   resources.index  337 B，SHA256 08F3CD66…，字节一致
+ *   icon.png         6320 B，SHA256 D8734140…，字节一致（这是 -z 压缩后的产物）
  *
  * Gradle 这一步还多做两件事，这里没做：
  *   1. 先删 generated 下的 R 目录和 original_res
@@ -37,13 +38,13 @@ export function run(ctx) {
     //   Error: config.json ref:'$media:icon' don't be defined
     // 传 src/main 才能跑通，产物是 config.json + R.txt + resources/ + resources.index。
     // api7 的 restool 才有 -b 参数把 variants 目录单列出来，这里不需要。
-    resourcesDir: path.join(ctx.moduleDir, "src", "main"),
+    moduleRoot: path.join(ctx.moduleDir, "src", "main"),
     configPath: ctx.paths.processProfile,
     bundleName: ctx.config.app.bundleName,
     moduleName: "entry",
     outDir,
-    // -z 压缩图片。不传的话 png 是源码原样大小（icon.png 3840 B），
-    // 传了才是 Gradle 产物那样（3621 B）。
+    // -z 压缩图片。不传的话 png 是源码原样大小（_empty 的 icon.png 6790 B），
+    // 传了才是 Gradle 产物那样（6320 B，SHA256 D8734140…）。
     compressImage: true,
     force: true
   });
@@ -71,7 +72,8 @@ export function verify(ctx) {
     return { ok: false, detail: `R.txt 字节不一致：我 ${a.length} B，gradle ${b.length} B` };
   }
 
-  // resources.index 允许版本号字节不同（restool 版本差异）
+  // 本机实测 resources.index 也是 0 差异。这里仍容忍 1 个字节，是留给换用
+  // 其他版本 restool 的余量（比如 api7 的 1.028，index 里的版本号字符串不同）。
   if (!fs.existsSync(theirIndex)) return { ok: true, detail: `R.txt ${a.length} B 一致（没有 index 可对照）` };
 
   const x = fs.readFileSync(ctx.paths.resources);

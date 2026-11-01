@@ -1,18 +1,24 @@
+import fs from "fs";
+import path from "path";
+
+import { prepareSigning, signZip } from "../sign/index.js";
 import { todo } from "./_util.js";
 
 /**
  * signReleaseApp —— 给 .app 整体包签名
  *
- * 只有 release 有这条链。任务注册条件写死了：buildType 是 RELEASE 且是主变体，
- * 否则任务根本不注册。
+ * 做法和签 hap 一样：往 .app 这个 zip 的中央目录前插一个 "HAP Sig Block 42"。
+ * 实测用 `java -jar hapsigntoolv2.jar sign -mode localjks` 现签了一份 .app，
+ * 块格式、摘要算法与本 SDK 的 signZip() 完全一致（digest 逐字节命中），
+ * 而 hap 和 .app 用的是同一套块结构，没有单独的 app 分支。
  *
- * Gradle 的动作：
+ * 注意 .app 里装的那两个 hap **保持原样**，不重新签名 ——
+ * 实测 jar 签出的 .app 里，entry-release-lite.hap 仍是未签的 144 条目文件树形态。
+ *
+ * Gradle 原本的动作：
  *   1. 输入 outPutsAppDir/<工程名>-release.app
- *   2. 调 SignUtil → java -jar hapsigntoolv2.jar sign -mode localjks
- *      -keystore … -signAlg … -inputFile … -outputFile …
+ *   2. 调 SignUtil → java -jar hapsigntoolv2.jar sign -mode localjks（不是 binlocaljks）
  *   3. 输出时把文件名里的 unsigned 换成 signed
- *
- * 本工程没配证书，这一步不会产出 signed 包。
  */
 
 export const name = "signReleaseApp";
@@ -24,9 +30,41 @@ export function run(ctx) {
     return null;
   }
 
-  todo(name, "已配证书：要调签名工具给 .app 签（-mode localjks），再把 unsigned 换成 signed");
+  if (!ctx.paths.app) todo(name, "缺少 .app，必须先跑 packageReleaseApp");
+
+  const signing = prepareSigning(ctx.signingConfig);
+
+  const r = signZip({
+    zipBuf: fs.readFileSync(ctx.paths.app),
+    p7b: signing.p7b,
+    keyPem: signing.keyPem,
+    certPems: signing.certPems,
+    signTime: signing.signTime
+  });
+
+  const out = ctx.paths.app.replace("-unsigned", "-signed");
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, r.zip);
+
+  ctx.paths.signedApp = out;
+  return out;
 }
 
-export function verify() {
-  return { ok: true, detail: "未配证书，不产出 signed 包（与 gradle 一致）" };
+export function verify(ctx) {
+  if (!ctx.signingConfig) {
+    return { ok: true, detail: "未配证书，不产出 signed 包（与 gradle 一致）" };
+  }
+  if (!ctx.paths.signedApp || !fs.existsSync(ctx.paths.signedApp)) {
+    return { ok: false, detail: "没有产出 signed .app" };
+  }
+
+  const buf = fs.readFileSync(ctx.paths.signedApp);
+  const at = buf.lastIndexOf("HAP Sig Block 42");
+  if (at < 0) return { ok: false, detail: "signed .app 里没有 HAP Sig Block" };
+
+  const blockLen = buf.readUInt32LE(at - 8);
+  return {
+    ok: true,
+    detail: `${path.basename(ctx.paths.signedApp)} ${buf.length} B，签名块 ${blockLen} B`
+  };
 }
