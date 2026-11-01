@@ -9,6 +9,11 @@
     "./bin": "./src/bin/index.js",
     "./hap": "./src/hap/index.js"
   },
+  "scripts": {
+    "build:hap": "node bin/hmlwsdk.js signReleaseHap",
+    "build:app": "node bin/hmlwsdk.js packageReleaseApp",
+    "build:signedApp": "node bin/hmlwsdk.js signReleaseApp"
+  },
   "keywords": [
     "harmonyos",
     "litewearable",

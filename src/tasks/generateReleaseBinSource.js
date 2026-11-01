@@ -36,7 +36,9 @@ export const produces = "js/release/source/lite/ 整个目录 + config.json";
 
 export function run(ctx) {
   const sourceRoot = path.join(ctx.work, "js", "release", "source", "lite");
-  fs.rmSync(sourceRoot, { recursive: true, force: true });
+  // 注意：这里**不能** rmSync 整个目录。webpack（compileReleaseJsWithNode）已经把
+  // assets/js/** 直接写进这个目录了，整体清空会把 81 个文件删掉 —— 之前 .bin 里
+  // 只有 config.json 一个条目就是这个原因。要清理的只有 assets/entry，见第 2 段。
   fs.mkdirSync(sourceRoot, { recursive: true });
 
   // ── 第 1 段：config.json 加工。这部分已能跑 ──────────────────────────
@@ -59,15 +61,69 @@ export function run(ctx) {
   ctx.paths.binSource = sourceRoot;
   ctx.paths.binSourceConfig = configOut;
 
-  // ── 第 2 段：复制 assets ────────────────────────────────────────────
-  // TODO 没实现。要做的是：
-  //   a. 把 moduleDir/src/main 下的 assets 复制过来，只排除 .txt 后缀
-  //   b. 把 webpack 产物（ctx.paths.jsBuild）里的 .bin 复制过来
-  //   c. resources.index 放到 assets/entry/ 下
-  //   d. restool 输出的 *.key（每个 1 B）也要放到 assets/entry/resources/base/media/
-  // 缺 (b) 和 (d) 的输入时没法验证，所以先留空。
+  // ── 第 2 段：复制 assets/entry ──────────────────────────────────────
+  // 分工已经实测清楚（devdemo release 产物共 92 个文件）：
+  //   assets/js/**    81 个  ← webpack 直接写在这个目录里，本任务不能碰
+  //   assets/entry/** 10 个  ← 本任务负责
+  //     8 个来自 restool 输出（resources.index + resources/ 整个目录，含 4 个 .key 和压缩后的 png）
+  //     2 个来自图片转换（icon.bin / icon_small.bin）
+  //   config.json      1 个  ← 上面已写
+  //
+  // 所以**不能整体清空 sourceRoot** —— 那会把 webpack 刚编好的 81 个文件删掉。
+  // 只清理 assets/entry 这一块，避免重复运行时残留。
+  fs.rmSync(path.join(sourceRoot, "assets", "entry"), { recursive: true, force: true });
+
+  // 兜底：sourceRoot 根下只允许有 assets/ 和 config.json。
+  // 早期的错误实现会把 webpack 产物写到根下（/app.js、/common/、/_releaseMap/ …），
+  // 换到正确 buildDir 后这些老文件会残留，被打进 .bin 里变成多余条目。
+  for (const ent of fs.readdirSync(sourceRoot)) {
+    if (ent === "assets" || ent === "config.json") continue;
+    fs.rmSync(path.join(sourceRoot, ent), { recursive: true, force: true });
+  }
+
+  const resOut = path.dirname(ctx.paths.resources); // work/res/release/normal/lite
+  const entryDir = path.join(sourceRoot, "assets", "entry");
+
+  // a. restool 的 resources/ 整个目录 → assets/entry/resources/
+  copyDir(path.join(resOut, "resources"), path.join(entryDir, "resources"));
+
+  // b. restool 的 resources.index → assets/entry/resources.index
+  fs.mkdirSync(entryDir, { recursive: true });
+  fs.copyFileSync(ctx.paths.resources, path.join(entryDir, "resources.index"));
+
+  // c. 清掉双后缀 .png.bin
+  // ace-loader 的 lite-image2bin.js 会同时写两份：xxx.bin 和 xxx.png.bin。
+  // Gradle 的 92 个产物条目里一个 .png.bin 都没有，只留单后缀那份。
+  removeDoubleSuffixBin(sourceRoot);
 
   return sourceRoot;
+}
+
+/**
+ * 删掉形如 icon.png.bin 的双后缀文件
+ * 依据 ace-loader/lib/lite/lite-image2bin.js：
+ *   f = t.replace(/\.(png|jpg|jpeg|bmp)$/i, ".bin")   // 单后缀
+ *   h = t + ".bin"                                     // 双后缀
+ *   两个都 writeFileSync
+ */
+function removeDoubleSuffixBin(dir) {
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) removeDoubleSuffixBin(p);
+    else if (/\.(png|jpg|jpeg|bmp)\.bin$/i.test(ent.name)) fs.rmSync(p, { force: true });
+  }
+}
+
+/** 递归复制目录，目标不存在就建 */
+function copyDir(src, dest) {
+  if (!fs.existsSync(src)) return;
+  fs.mkdirSync(dest, { recursive: true });
+  for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, ent.name);
+    const d = path.join(dest, ent.name);
+    if (ent.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
 }
 
 export function verify(ctx) {

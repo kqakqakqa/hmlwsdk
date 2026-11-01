@@ -55,6 +55,46 @@ export const TASKS = [
   zipSources
 ];
 
+/**
+ * 依赖表 —— 从 doc/gradle-build-report.html 每个卡片的 kids 字段抄来的
+ *
+ * 构建是「按需」的：跑某个入口任务时，只跑它依赖的任务，不是把这个数组从头到尾
+ * 扫一遍。比如 packageReleaseApp 不会带出 zipSources / validateUploadState。
+ *
+ * 报告里 packageReleaseHap 的 kids 列了 6 个，其中有几个是冗余的（generateReleaseBinSource
+ * 和 compileReleaseResources 已经通过 signReleaseJsBin → generateReleaseJsBin → ... 覆盖）。
+ * 这里原样保留，拓扑排序会自己去重。
+ */
+export const DEPENDS = {
+  mergeReleaseResources: [],
+  mergeReleaseProfile: ["mergeReleaseResources"],
+  generateReleaseJsManifest: ["mergeReleaseProfile"],
+  compileReleaseJsWithNode: ["generateReleaseJsManifest"],
+  processReleaseProfile: ["mergeReleaseProfile"],
+  compileReleaseResources: ["processReleaseProfile"],
+  generateReleaseBinSource: ["compileReleaseResources", "compileReleaseJsWithNode"],
+  processReleaseJavaRes: [],
+  processReleaseLibsFile: [],
+  generateReleaseJsBin: ["generateReleaseBinSource"],
+  signReleaseJsBin: ["generateReleaseJsBin"],
+  packageReleaseHap: [
+    "processReleaseJavaRes",
+    "processReleaseLibsFile",
+    "generateReleaseBinSource",
+    "signReleaseJsBin",
+    "compileReleaseResources",
+    "compileReleaseJsWithNode"
+  ],
+  signReleaseHap: ["packageReleaseHap"],
+
+  validateReleaseDistroFilterTask: [],
+  packageReleaseApp: ["validateReleaseDistroFilterTask", "packageReleaseHap"],
+  signReleaseApp: ["packageReleaseApp"],
+
+  validateUploadState: [],
+  zipSources: ["validateUploadState", "packageReleaseApp"]
+};
+
 export function findTask(name) {
   return TASKS.find((t) => t.name === name) ?? null;
 }

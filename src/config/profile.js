@@ -59,11 +59,30 @@ export function processProfile(config) {
 }
 
 /**
- * 序列化。实测 gradle 产出的 config.json 是：
- *   - 4 空格缩进
- *   - LF 换行
- *   - 文件末尾没有多余换行
+ * 序列化。必须和 Gradle 的 Java 序列化器一致，否则产物差 98 B。
+ *
+ * 实测两个格式差异（devdemo release 的 config.json，Gradle 3422 B vs 我们 3324 B）：
+ *
+ * 1. 非 ASCII 字符转义。Gradle 写 "\u4f20\u611f\u5668..."，我们直接写中文。
+ *    "传感器订阅功能" 7 个中文 = 21 字节，转义后 42 字节，4 处共差 84 B。
+ *
+ * 2. 空对象带换行。Gradle 写：
+ *        "deviceConfig": {
+ *
+ *        },
+ *    中间那行是「缩进 + 4 个空格」的空行。我们写的是 `"deviceConfig": {},`，差约 15 B。
+ *
+ * 84 + 15 ≈ 98 B，正好对上总差异。
  */
 export function stringifyConfig(config) {
-  return JSON.stringify(config, null, 4);
+  return (
+    JSON.stringify(config, null, 4)
+      // 非 ASCII → \uXXXX（小写十六进制，与 Java 一致）
+      .replace(/[^\x00-\x7F]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"))
+      // 空对象展开成三行，中间是「当前缩进 + 4 空格」的空行
+      .replace(
+        /^(\s*)"([^"]+)": \{\}(,?)$/gm,
+        (_, ind, key, comma) => `${ind}"${key}": {\n${ind}    \n${ind}}${comma}`
+      )
+  );
 }

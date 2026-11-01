@@ -5,15 +5,24 @@ import { compileJs } from "../js/aceLoader.js";
 import { todo } from "./_util.js";
 
 /**
- * compileReleaseJsWithNode —— node + webpack 编译（release 变体）
+ * compileReleaseJsWithNode —— node + webpack 编译
  *
- * 与 debug 的差异（依据 Gradle 行为）：
- *   1. webpack 换 mode production，产物被压缩
- *   2. sourcemap 不原地输出，改挪到 _releaseMap/ 目录
- *   3. 其余流程一致
+ * 关键点：aceModuleRoot 必须是**组件目录**，不是模块根目录。
  *
- * 所以这里不能像别的任务那样直接转发 debug 那份 —— buildMode 变了，
- * 产物的字节数也完全不同，没有 release 样本可对照。
+ * 依据 ace-loader/webpack.lite.config.js 第 119 行：
+ *   process.env.projectPath = env.aceModuleRoot || ... || process.cwd()
+ * 然后 main.product.js 的 loadEntryObj 里检查 path.resolve(projectPath, 'app.js')
+ * 存不存在，不存在就报 ERROR: missing app.js。
+ *
+ * 所以 Gradle 是「每个组件单独编一次」，aceModuleRoot 传的是
+ * <模块>/src/main/js/<组件名>。传 src/main 会直接报 missing app.js。
+ *
+ * 产物仍写到模块级的 buildDir（webpack 自己按组件名展开成
+ * assets/js/<组件名>/），实测产物结构与 devdemo 的
+ * js/release/source/lite/assets/js/default/ 对得上。
+ *
+ * release 与 debug 的差别：webpack 换 mode production，代码被压缩
+ * 实测（devdemo 两变体对比）：app.js 6187 → 1604，app.bc 2564 → 1812。
  */
 
 export const name = "compileReleaseJsWithNode";
@@ -21,30 +30,83 @@ export const produces = "js/release/source/lite/assets/js/<组件>/*.js|*.bc";
 
 export function run(ctx) {
   if (!ctx.paths.jsManifest) todo(name, "缺少 jsManifest，必须先跑 generateReleaseJsManifest");
+  if (!ctx.config) todo(name, "缺少 ctx.config，必须先跑 mergeReleaseProfile");
 
-  const buildDir = path.join(ctx.work, "js", "release", "source", "lite");
+  const components = ctx.config.module?.js ?? [];
+  if (!components.length) todo(name, "config.json 里没有 module.js，取不到组件名");
 
-  const r = compileJs({
-    moduleRoot: path.join(ctx.moduleDir, "src", "main"),
-    buildDir,
-    manifestPath: ctx.paths.jsManifest,
-    buildMode: "release",
-    deviceType: "liteWearable",
-    hapMode: true
-  });
+  const sourceRoot = path.join(ctx.work, "js", "release", "source", "lite");
 
-  if (!r.ok) {
-    throw new Error(`${name} 失败（webpack 返回 ${r.code}）\n${(r.stdout ?? "").slice(-3000)}`);
+  for (const comp of components) {
+    // 组件目录，下面必须有 app.js
+    const moduleRoot = path.join(ctx.moduleDir, "src", "main", "js", comp.name);
+    if (!fs.existsSync(path.join(moduleRoot, "app.js"))) {
+      throw new Error(`${name}: ${moduleRoot} 下没有 app.js，确认组件名 ${comp.name} 对不对`);
+    }
+
+    // 每个组件有自己的一份 manifest
+    const manifestPath = path.join(ctx.work, "js", "release", "jsManifest", comp.name, "manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      todo(name, `组件 ${comp.name} 的 manifest.json 不存在：${manifestPath}（generateReleaseJsManifest 目前只生成第一个组件的）`);
+    }
+
+    // buildPath 必须带上 assets/js/<组件名> 这一层。
+    // 传 source/lite 的话 webpack 会把 app.js / common/ / pages/ 直接写在根下，
+    // 而 Gradle 的产物结构是 assets/js/default/app.js —— 实测差 83 个条目。
+    const buildDir = path.join(sourceRoot, "assets", "js", comp.name);
+
+    // resources 下的 png 也要转成 .bin，靠 img2bin 的 iconPath 环境变量。
+    // restool 没跑过时这个目录不存在，就不传（不是所有调用方都需要它）。
+    const resPngDir = ctx.paths.resources ? path.join(path.dirname(ctx.paths.resources), "resources") : null;
+
+    const r = compileJs({
+      moduleRoot,
+      buildDir,
+      manifestPath,
+      iconPath: resPngDir && fs.existsSync(resPngDir) ? resPngDir : undefined,
+      // 缓存必须放在产物目录外面。默认的 <buildDir>/../cache 会落在
+      // assets/js/cache/ 下，被打进 .bin 变成多余条目（实测多出 2 个 .pack.gz）。
+      cacheDir: path.join(ctx.work, "js", "release", "cache"),
+      buildMode: "release",
+      deviceType: "liteWearable",
+      hapMode: true
+    });
+
+    if (!r.ok) {
+      throw new Error(
+        `${name} 失败：组件 ${comp.name}（webpack 返回 ${r.code}）\n` +
+          (r.stderr ?? "").slice(-2000) +
+          "\n" +
+          (r.stdout ?? "").slice(-2000)
+      );
+    }
+
+    // 清掉 webpack 的中间文件 —— Gradle 的 92 个产物里没有这些。
+    // 实测 devdemo 会多出 image_convert_result.txt、preview_css.json、_releaseMap/。
+    for (const junk of ["image_convert_result.txt", "preview_css.json"]) {
+      fs.rmSync(path.join(buildDir, junk), { force: true });
+    }
+    fs.rmSync(path.join(buildDir, "_releaseMap"), { recursive: true, force: true });
   }
 
-  // TODO sourcemap 挪到 _releaseMap/ 这一步没实现，也没验证过 webpack 侧到底输出到哪
-  ctx.paths.jsBuild = buildDir;
-  return buildDir;
+  ctx.paths.jsBuild = sourceRoot;
+  return sourceRoot;
 }
 
-export function verify() {
-  return {
-    ok: false,
-    detail: "未对照：release 的 webpack 产物没有样本（_empty 只构建过 debug）"
-  };
+export function verify(ctx) {
+  const theirs = path.join(ctx.sample, "build", "intermediates", "js", "release", "source", "lite", "assets", "js", "default");
+  if (!fs.existsSync(theirs)) return { ok: false, detail: `没有对照产物：${theirs}` };
+
+  const mine = path.join(ctx.work, "js", "release", "source", "lite", "assets", "js", "default");
+  const bad = [];
+  for (const f of ["app.js", "app.bc", "manifest.json"]) {
+    const a = path.join(mine, f);
+    const b = path.join(theirs, f);
+    if (!fs.existsSync(a)) bad.push(`${f} 没产出`);
+    else if (fs.existsSync(b) && fs.statSync(a).size !== fs.statSync(b).size) {
+      bad.push(`${f} ${fs.statSync(a).size} B ≠ ${fs.statSync(b).size} B`);
+    }
+  }
+  if (bad.length) return { ok: false, detail: bad.join("；") };
+  return { ok: true, detail: "app.js / app.bc / manifest.json 尺寸与 gradle 一致" };
 }

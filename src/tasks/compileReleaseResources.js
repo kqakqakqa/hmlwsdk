@@ -32,12 +32,19 @@ export function run(ctx) {
   const outDir = path.join(ctx.work, "res", "release", "normal", "lite");
 
   const r = compileResources({
-    resourcesDir: path.join(ctx.moduleDir, "src", "main", "resources"),
-    variantsDir: ctx.variantsDir,
+    // ⚠ api6 的 -i 要指向**模块根目录** src/main，不是 src/main/resources。
+    // 实测（api6 restool 批量试参数）：传 src/main/resources 会报
+    //   Error: config.json ref:'$media:icon' don't be defined
+    // 传 src/main 才能跑通，产物是 config.json + R.txt + resources/ + resources.index。
+    // api7 的 restool 才有 -b 参数把 variants 目录单列出来，这里不需要。
+    resourcesDir: path.join(ctx.moduleDir, "src", "main"),
     configPath: ctx.paths.processProfile,
     bundleName: ctx.config.app.bundleName,
     moduleName: "entry",
     outDir,
+    // -z 压缩图片。不传的话 png 是源码原样大小（icon.png 3840 B），
+    // 传了才是 Gradle 产物那样（3621 B）。
+    compressImage: true,
     force: true
   });
 
