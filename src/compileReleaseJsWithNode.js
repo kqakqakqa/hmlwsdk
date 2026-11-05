@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 
 import { compileJs } from "./runWebpack.js";
+import { generateJsSnapshot } from "./generateJsSnapshot.js";
 import { todo } from "./createTaskContext.js";
 
 /**
@@ -28,7 +29,7 @@ import { todo } from "./createTaskContext.js";
 export const name = "compileReleaseJsWithNode";
 export const produces = "js/release/source/lite/assets/js/<组件>/*.js|*.bc";
 
-export function run(taskContext) {
+export async function run(taskContext) {
   if (!taskContext.paths.jsManifest) todo(name, "缺少 jsManifest，必须先跑 generateReleaseJsManifest");
   if (!taskContext.config) todo(name, "缺少 taskContext.config，必须先跑 mergeReleaseProfile");
 
@@ -87,6 +88,15 @@ export function run(taskContext) {
       fs.rmSync(path.join(buildDir, junk), { force: true });
     }
     fs.rmSync(path.join(buildDir, "_releaseMap"), { recursive: true, force: true });
+
+    // webpack 只出 .js，真机要的 .bc 在这里补。
+    // ace-loader 的 SnapshotPlugin（exec Windows 专属 exe 的那个）已经被
+    // --isPreview=true 关掉，换成进程内的 jerry-parser-wasm。
+    // 实测（devdemo debug 22 个文件）397 ms，平均 18 ms/个，比每次 exec 起进程还快。
+    const snapped = await generateJsSnapshot(buildDir);
+    if (!snapped.count) {
+      throw new Error(`${name}: ${buildDir} 下没有生成任何 .js，webpack 产物不对`);
+    }
   }
 
   taskContext.paths.jsBuild = sourceRoot;

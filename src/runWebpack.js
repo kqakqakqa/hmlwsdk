@@ -78,6 +78,11 @@ export function compileJs(opts) {
     `--deviceType=${dev}`,
     `--buildMode=${mode}`,
     `--sourceMap=${sm}`,
+    // 关掉 ace-loader 内建的 SnapshotPlugin —— 它 exec 的是 Windows 专属的
+    // jerry-snapshot.exe。依据 webpack.lite.config.js 第 144 行：
+    //   if (argv.isPreview !== "true") { webpackConfig.plugins.push(new SnapshotPlugin(...)) }
+    // .bc 改由本 SDK 自己用 jerry-parser-wasm 生成，见 src/generateJsSnapshot.js。
+    "--isPreview=true",
     // api7 的配置读的是 env.xxx，两个都传，谁用谁取
     "--env", `deviceType=${dev}`,
     "--env", `buildMode=${mode}`,

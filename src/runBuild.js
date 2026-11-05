@@ -51,12 +51,15 @@ export function plan(target) {
 /**
  * 真跑
  *
+ * async：compileReleaseJsWithNode 要 await wasm 版的 jerry-snapshot 生成 .bc，
+ * 所以任务函数允许返回 Promise，这里统一 await。同步任务照旧直接返回，不受影响。
+ *
  * @param {object} taskContext 见 src/createTaskContext.js 的 createTaskContext
  * @param {string} target 入口任务名
  * @param {(line:string)=>void} [log] 进度回调，默认打控制台
  * @returns {{ok:boolean, results:Array, failedAt?:string}}
  */
-export function runBuild(taskContext, target, log = console.log) {
+export async function runBuild(taskContext, target, log = console.log) {
   const order = resolveOrder(target);
   const results = [];
 
@@ -67,7 +70,7 @@ export function runBuild(taskContext, target, log = console.log) {
 
     const t0 = Date.now();
     try {
-      task.run(taskContext);
+      await task.run(taskContext);
       const ms = Date.now() - t0;
       results.push({ name, ok: true, ms });
       log(`✓ ${name.padEnd(32)} ${String(ms).padStart(6)} ms`);

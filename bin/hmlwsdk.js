@@ -83,7 +83,7 @@ const taskContext = createTaskContext({
     : undefined
 });
 
-const r = runBuild(taskContext, target);
+const r = await runBuild(taskContext, target);
 
 if (!r.ok) {
   console.error(`\n构建失败，卡在 ${r.failedAt}`);
