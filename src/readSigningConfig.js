@@ -203,9 +203,9 @@ function writeSigningConfig(configPath, config) {
   fs.writeFileSync(
     configPath,
     `/**\n` +
-      ` * 由 hmlwsdk 自动生成/更新 —— 发现 cert/ 里的签名材料后回写到这里，下次不用再猜。\n` +
-      ` * 这个文件含明文密码，cert/.gitignore 已忽略整个目录，不会进版本库。\n` +
-      ` * 路径相对 cert/ 目录。\n` +
+      ` * Generated/updated by hmlwsdk — written back once signing material was found in cert/, so nothing has to be guessed next time.\n` +
+      ` * This file holds a plaintext password; cert/.gitignore ignores the whole directory, so it never reaches version control.\n` +
+      ` * Paths are relative to the cert/ directory.\n` +
       ` */\n` +
       `export default {\n${body}\n};\n`
   );

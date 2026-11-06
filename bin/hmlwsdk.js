@@ -61,18 +61,18 @@ const COMMANDS = {
 function printUsage() {
   console.error("usage: hmlwsdk <command> [project-dir]");
   console.error(`commands: ${Object.keys(COMMANDS).join("  ")}`);
-  console.error("  create           从内置模板造一个新工程（目录参数是字面目标路径，省略用当前目录）");
-  console.error("  init             把工程初始化成一条命令出包（生成 config / cert / build 目录）");
+  console.error("  create           scaffold a new project from the built-in template (the dir arg is the literal target path, defaults to cwd)");
+  console.error("  init             turn a project into one-command builds (creates config / cert / build)");
   console.error("  buildBin         .bin");
-  console.error("  buildApp         .app（含 .bin 形态的 hap、.bin），cert/ 有材料就签");
-  console.error("  buildSignedHap   里面那个 .bin 已签名的 hap（要求 cert/ 有材料）");
-  console.error("  buildSignedApp   签名后的 .app（要求 cert/ 有材料）");
+  console.error("  buildApp         .app (plus the .bin-form hap and the .bin), signed when cert/ has material");
+  console.error("  buildSignedHap   the hap whose inner .bin is signed (requires material in cert/)");
+  console.error("  buildSignedApp   the signed .app (requires material in cert/)");
   console.error("");
-  console.error("init / build* 的 project-dir 省略时从当前目录向上找含 entry/src/main/config.json 的那一层");
-  console.error("create 的 project-dir 省略时就在当前目录建，且除 . 开头的条目外必须为空");
-  console.error("example: hmlwsdk create myapp    造一个新工程到 ./myapp");
-  console.error("         hmlwsdk init            已有工程：在工程根执行一次");
-  console.error("         hmlwsdk buildApp        之后随时跑，签名材料从 cert/ 读");
+  console.error("project-dir may be omitted for init / build*: it walks up from cwd to the level holding entry/src/main/config.json");
+  console.error("project-dir may be omitted for create: it builds in cwd, which must be empty apart from dot entries");
+  console.error("example: hmlwsdk create myapp    scaffold a new project into ./myapp");
+  console.error("         hmlwsdk init            existing project: run once at the project root");
+  console.error("         hmlwsdk buildApp        run any time afterwards, signing material comes from cert/");
 }
 
 const command = args[0];

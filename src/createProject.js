@@ -72,7 +72,7 @@ export function createProject(opts = {}) {
   writeFileOnce(path.join(root, "build.config.js"), buildConfigTemplate(TEMPLATE_VERSIONS));
 
   log(`hmlwsdk create  ${root}`);
-  log(`  模板 ${TEMPLATE_NAME} → ${copied.length} 个文件，appName = ${appName}`);
+  log(`  template ${TEMPLATE_NAME} → ${copied.length} files, appName = ${appName}`);
   for (const f of copied) log(`  ✓ ${f}`);
 
   // 接着把它初始化成能一条命令出包的工程（init 会打自己那一份日志）

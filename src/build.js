@@ -229,7 +229,7 @@ export async function build(opts) {
   outputs.publishedApp = publish(outputs.signedApp ?? appPath, outRoot, config.app.bundleName, ".app");
 
   if (!signingConfig) {
-    log(`! ${CERT_DIR}/ 里没有签名材料，build/ 下的产物是未签名的，装不到表上`);
+    log(`! no signing material in ${CERT_DIR}/, the artifacts under build/ are unsigned and cannot be installed on a watch`);
   }
   return outputs;
 }
