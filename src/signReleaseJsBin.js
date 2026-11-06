@@ -23,7 +23,7 @@ export const name = "signReleaseJsBin";
 export const produces = "bin/release/entry-release-signed.bin";
 
 export function run(taskContext) {
-  if (!taskContext.paths.unsignedBin) todo(name, "缺少 .bin，必须先跑 generateReleaseJsBin");
+  if (!taskContext.paths.unsignedBin) todo(name, "missing .bin, run generateReleaseJsBin first");
 
   if (!taskContext.signingConfig) {
     taskContext.paths.signedBin = taskContext.paths.unsignedBin;

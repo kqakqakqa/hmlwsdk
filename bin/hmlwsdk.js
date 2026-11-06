@@ -42,8 +42,8 @@ const target = args[0];
 const projectDir = args[1];
 
 if (!target) {
-  console.error("用法: hmlwsdk <任务名> <工程目录> [--work 目录] [--plan]");
-  console.error("例如: hmlwsdk signReleaseApp /path/to/apps/devdemo/devdemo");
+  console.error("usage: hmlwsdk <task> <project-dir> [--work <dir>] [--plan]");
+  console.error("example: hmlwsdk signReleaseApp /path/to/apps/devdemo/devdemo");
   console.error("      hmlwsdk --plan signReleaseApp");
   process.exit(1);
 }
@@ -55,7 +55,7 @@ if (flags.plan) {
 }
 
 if (!projectDir) {
-  console.error("缺少工程目录。用法: hmlwsdk <任务名> <工程目录>");
+  console.error("missing project dir. usage: hmlwsdk <task> <project-dir>");
   process.exit(1);
 }
 
@@ -64,7 +64,7 @@ const moduleDir = path.join(root, "entry");
 const configPath = path.join(moduleDir, "src", "main", "config.json");
 
 if (!fs.existsSync(configPath)) {
-  console.error(`找不到 ${configPath}，确认工程目录指对了（应该指向含 entry/ 的那一级）。`);
+  console.error(`cannot find ${configPath}, make sure the project dir points at the level that contains entry/`);
   process.exit(1);
 }
 
@@ -86,8 +86,8 @@ const taskContext = createTaskContext({
 const r = await runBuild(taskContext, target);
 
 if (!r.ok) {
-  console.error(`\n构建失败，卡在 ${r.failedAt}`);
+  console.error(`\nbuild failed at ${r.failedAt}`);
   process.exit(1);
 }
 
-console.log(`\n产物目录：${taskContext.work}`);
+console.log(`\noutput dir: ${taskContext.work}`);

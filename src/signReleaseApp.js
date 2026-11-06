@@ -22,7 +22,7 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "signReleaseApp";
-export const produces = "app/release/<工程名>-release-signed.app";
+export const produces = "app/release/<project-name>-release-signed.app";
 
 export function run(taskContext) {
   if (!taskContext.signingConfig) {
@@ -30,7 +30,7 @@ export function run(taskContext) {
     return null;
   }
 
-  if (!taskContext.paths.app) todo(name, "缺少 .app，必须先跑 packageReleaseApp");
+  if (!taskContext.paths.app) todo(name, "missing .app, run packageReleaseApp first");
 
   const signing = prepareSigning(taskContext.signingConfig);
 

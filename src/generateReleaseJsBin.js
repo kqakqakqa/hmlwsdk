@@ -57,10 +57,10 @@ export function sortEntries(entries) {
 }
 
 export function run(taskContext) {
-  if (!taskContext.paths.binSource) todo(name, "缺少 binSource 目录，必须先跑 generateReleaseBinSource");
+  if (!taskContext.paths.binSource) todo(name, "missing binSource directory, run generateReleaseBinSource first");
 
   const entries = sortEntries(collect(taskContext.paths.binSource));
-  if (entries.length === 0) todo(name, "binSource 目录是空的，组装 assets 那步还没完成");
+  if (entries.length === 0) todo(name, "the binSource directory is empty, the assets assembling step is not done yet");
 
   const outDir = path.join(taskContext.work, "bin", "release");
   fs.mkdirSync(outDir, { recursive: true });

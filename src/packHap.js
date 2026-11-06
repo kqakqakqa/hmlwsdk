@@ -11,6 +11,6 @@ import { writeZip } from "./readWriteZip.js";
  * @returns {Buffer} hap
  */
 export function packHap(binBuf, binFileName) {
-  if (!binFileName) throw new Error("必须指定 .bin 在包内的文件名");
+  if (!binFileName) throw new Error("the file name of the .bin inside the hap is required");
   return writeZip([{ name: binFileName, content: binBuf }], { compress: false });
 }

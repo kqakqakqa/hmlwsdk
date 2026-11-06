@@ -25,8 +25,8 @@ export { stripZipSignature, readZipLayout } from "./signZip.js";
  * @param {{p7b:string, p12?:string, password?:string, keyFile?:string, certPath?:string, signTime?:string}} config
  */
 export function prepareSigning(config) {
-  if (!config?.p7b) throw new Error("签名至少要给 p7b 路径（--p7b）");
-  if (!fs.existsSync(config.p7b)) throw new Error(`p7b 不存在：${config.p7b}`);
+  if (!config?.p7b) throw new Error("signing needs at least a p7b path (--p7b)");
+  if (!fs.existsSync(config.p7b)) throw new Error(`p7b not found: ${config.p7b}`);
 
   const p7b = fs.readFileSync(config.p7b);
   const profile = parseP7b(p7b);
@@ -36,7 +36,7 @@ export function prepareSigning(config) {
     ? splitPemCerts(fs.readFileSync(config.certPath, "utf8"))
     : splitPemCerts(HUAWEI_CHAIN_PEM);
 
-  if (chain.length < 2) throw new Error(`证书链里只找到 ${chain.length} 张证书，至少要根+中间两张`);
+  if (chain.length < 2) throw new Error(`the certificate chain has only ${chain.length} certificate(s), it needs at least the root and the intermediate`);
 
   return {
     profile,

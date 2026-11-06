@@ -42,7 +42,7 @@ export function signZip({ zipBuf, p7b, keyPem, certPems, signTime }) {
 
   const eocd = src.subarray(eocdAt);
   if (eocd.length !== 22 + eocd.readUInt16LE(20)) {
-    throw new Error("EOCD 长度和 comment 长度对不上，这个 zip 可能被截断过");
+    throw new Error("EOCD length does not match the comment length, this zip may have been truncated");
   }
 
   const inputs = [src.subarray(0, cdOffset), src.subarray(cdOffset, cdOffset + cdSize), eocd];
@@ -129,5 +129,5 @@ function findEocd(buf) {
     if (buf[i] !== 0x50 || buf[i + 1] !== 0x4b || buf[i + 2] !== 0x05 || buf[i + 3] !== 0x06) continue;
     if (i + 22 + buf.readUInt16LE(i + 20) === buf.length) return i;
   }
-  throw new Error("找不到 EOCD，这不是一个完整的 zip");
+  throw new Error("EOCD not found, this is not a complete zip");
 }

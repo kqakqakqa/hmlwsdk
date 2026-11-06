@@ -31,7 +31,7 @@ import { stripSignature, isSignedBin } from "../readWriteBin.js";
  */
 export function signBin({ unsignedBin, p7b, keyPem, certPems, signTime }) {
   if (p7b.length > 0xffff) {
-    throw new Error(`p7b 有 ${p7b.length} B，超过 proBlock 的 uint16 上限 65535`);
+    throw new Error(`p7b is ${p7b.length} B, over the uint16 limit of proBlock (65535)`);
   }
 
   const unsigned = isSignedBin(unsignedBin) ? stripSignature(unsignedBin) : unsignedBin;

@@ -35,7 +35,7 @@ export const name = "packageReleaseHap";
 export const produces = "hap/release/entry-bin-release-lite-unsigned.hap + entry-release-lite-unsigned.hap";
 
 export function run(taskContext) {
-  if (!taskContext.paths.unsignedBin && !taskContext.paths.signedBin) todo(name, "缺少 .bin，必须先跑 generateReleaseJsBin");
+  if (!taskContext.paths.unsignedBin && !taskContext.paths.signedBin) todo(name, "missing .bin, run generateReleaseJsBin first");
 
   const binPath = taskContext.paths.signedBin ?? taskContext.paths.unsignedBin;
   const outDir = path.join(taskContext.work, "hap", "release");
@@ -49,8 +49,8 @@ export function run(taskContext) {
   // ── 形态二：文件树 ────────────────────────────────────────────────
   // isNeedPackage() 在 release 下为 true；调用方可以传 taskContext.needPackage = false 显式关掉
   if (taskContext.needPackage !== false) {
-    if (!taskContext.paths.binSource) todo(name, "缺少 binSource 目录，必须先跑 generateReleaseBinSource");
-    if (!taskContext.config) todo(name, "缺少 taskContext.config");
+    if (!taskContext.paths.binSource) todo(name, "missing binSource directory, run generateReleaseBinSource first");
+    if (!taskContext.config) todo(name, "missing taskContext.config");
 
     const treeHap = path.join(outDir, "entry-release-lite-unsigned.hap");
     fs.writeFileSync(treeHap, packTreeHap(taskContext.paths.binSource, taskContext.config));

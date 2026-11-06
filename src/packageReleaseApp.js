@@ -24,13 +24,13 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "packageReleaseApp";
-export const produces = "app/release/<工程名>-release-unsigned.app + pack.info + appInfo.json";
+export const produces = "app/release/<project-name>-release-unsigned.app + pack.info + appInfo.json";
 
 export function run(taskContext) {
   if (!taskContext.paths.treeHap) {
-    todo(name, "缺少文件树形态的 hap —— .app 只收文件树形态，.bin 形态会被过滤掉。必须先跑 packageReleaseHap");
+    todo(name, "missing the file-tree hap: .app only takes the file-tree form, the .bin form gets filtered out. run packageReleaseHap first");
   }
-  if (!taskContext.config) todo(name, "缺少 taskContext.config");
+  if (!taskContext.config) todo(name, "missing taskContext.config");
 
   const outDir = path.join(taskContext.work, "app", "release");
   fs.mkdirSync(outDir, { recursive: true });

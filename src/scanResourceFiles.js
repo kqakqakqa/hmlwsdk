@@ -84,24 +84,24 @@ export function scanResourceFiles(moduleRoot) {
   for (const entry of listDir(resourcesDir)) {
     if (COPY_ONLY_DIRS.has(entry.name)) continue;
     if (!entry.isDirectory) {
-      throw new Error(`resources 下只能放目录，实际是文件: ${entry.name}`);
+      throw new Error(`resources may only contain directories, found a file: ${entry.name}`);
     }
 
     const limitKey = entry.name;
     const keyParams = parseLimitKey(limitKey);
     if (keyParams === null) {
-      throw new Error(`无法识别的限定目录名: ${limitKey}`);
+      throw new Error(`unknown qualifier directory: ${limitKey}`);
     }
 
     const clusters = [];
     for (const clusterDir of listDir(path.join(resourcesDir, limitKey))) {
       if (!clusterDir.isDirectory) {
-        throw new Error(`${limitKey} 下只能放资源簇目录，实际是文件: ${clusterDir.name}`);
+        throw new Error(`${limitKey} may only contain resource cluster directories, found a file: ${clusterDir.name}`);
       }
       const dirType = CLUSTER_TYPES[clusterDir.name];
       if (dirType === undefined) {
         throw new Error(
-          `无法识别的资源簇目录: ${limitKey}/${clusterDir.name}（只认 ${Object.keys(CLUSTER_TYPES).join(" / ")}）`
+          `unknown resource cluster directory: ${limitKey}/${clusterDir.name} (expected one of ${Object.keys(CLUSTER_TYPES).join(" / ")})`
         );
       }
 
@@ -111,7 +111,7 @@ export function scanResourceFiles(moduleRoot) {
         if (isIgnored(f.name)) continue;
         // restool 对资源簇里的子目录直接报 "not a file"，不递归
         if (f.isDirectory) {
-          throw new Error(`${limitKey}/${clusterDir.name} 下不能再有子目录，实际有: ${f.name}`);
+          throw new Error(`${limitKey}/${clusterDir.name} must not contain subdirectories, found: ${f.name}`);
         }
         files.push(path.join(dirPath, f.name));
       }

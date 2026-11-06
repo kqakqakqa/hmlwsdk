@@ -28,14 +28,14 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "generateReleaseJsManifest";
-export const produces = "js/release/jsManifest/<组件>/manifest.json";
+export const produces = "js/release/jsManifest/<component>/manifest.json";
 
 export function run(taskContext) {
   const c = taskContext.config;
-  if (!c) todo(name, "缺少 taskContext.config，必须先跑 mergeReleaseProfile");
+  if (!c) todo(name, "missing taskContext.config, run mergeReleaseProfile first");
 
   const jsModules = c.module?.js;
-  if (!jsModules?.length) todo(name, "config.json 里没有 module.js，取不到组件名和 pages");
+  if (!jsModules?.length) todo(name, "config.json has no module.js, cannot get the component names and pages");
 
   const comp = jsModules[0];
   const outDir = path.join(taskContext.work, "js", "release", "jsManifest", comp.name);

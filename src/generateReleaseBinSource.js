@@ -32,7 +32,7 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "generateReleaseBinSource";
-export const produces = "js/release/source/lite/ 整个目录 + config.json";
+export const produces = "js/release/source/lite/ the whole directory + config.json";
 
 export function run(taskContext) {
   const sourceRoot = path.join(taskContext.work, "js", "release", "source", "lite");
@@ -45,8 +45,8 @@ export function run(taskContext) {
   // 两处改动才能从 process 阶段的产物变成最终打进包的版本：
   //   1. abilities 里回填 iconId / labelId（从 R.txt 查出来）
   //   2. deviceType 清空后只写回 LITE_WEARABLE
-  if (!taskContext.config) todo(name, "缺少 taskContext.config，必须先跑 mergeReleaseProfile");
-  if (!taskContext.paths.rTxt) todo(name, "缺少 R.txt，必须先跑 compileReleaseResources");
+  if (!taskContext.config) todo(name, "missing taskContext.config, run mergeReleaseProfile first");
+  if (!taskContext.paths.rTxt) todo(name, "missing R.txt, run compileReleaseResources first");
 
   const rtable = parseRTable(fs.readFileSync(taskContext.paths.rTxt, "utf8"));
   const config = structuredClone(taskContext.config);

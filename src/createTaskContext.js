@@ -25,5 +25,5 @@ export function createTaskContext(fields) {
  * @param {string} what 该产出什么
  */
 export function todo(name, what) {
-  throw new Error(`[TODO] ${name} 还没实现 —— ${what}`);
+  throw new Error(`[TODO] ${name} is not implemented yet: ${what}`);
 }

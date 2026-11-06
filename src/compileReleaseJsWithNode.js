@@ -27,14 +27,14 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "compileReleaseJsWithNode";
-export const produces = "js/release/source/lite/assets/js/<组件>/*.js|*.bc";
+export const produces = "js/release/source/lite/assets/js/<component>/*.js|*.bc";
 
 export async function run(taskContext) {
-  if (!taskContext.paths.jsManifest) todo(name, "缺少 jsManifest，必须先跑 generateReleaseJsManifest");
-  if (!taskContext.config) todo(name, "缺少 taskContext.config，必须先跑 mergeReleaseProfile");
+  if (!taskContext.paths.jsManifest) todo(name, "missing jsManifest, run generateReleaseJsManifest first");
+  if (!taskContext.config) todo(name, "missing taskContext.config, run mergeReleaseProfile first");
 
   const components = taskContext.config.module?.js ?? [];
-  if (!components.length) todo(name, "config.json 里没有 module.js，取不到组件名");
+  if (!components.length) todo(name, "config.json has no module.js, cannot get the component names");
 
   const sourceRoot = path.join(taskContext.work, "js", "release", "source", "lite");
 
@@ -42,13 +42,13 @@ export async function run(taskContext) {
     // 组件目录，下面必须有 app.js
     const moduleRoot = path.join(taskContext.moduleDir, "src", "main", "js", comp.name);
     if (!fs.existsSync(path.join(moduleRoot, "app.js"))) {
-      throw new Error(`${name}: ${moduleRoot} 下没有 app.js，确认组件名 ${comp.name} 对不对`);
+      throw new Error(`${name}: no app.js under ${moduleRoot}, check the component name ${comp.name}`);
     }
 
     // 每个组件有自己的一份 manifest
     const manifestPath = path.join(taskContext.work, "js", "release", "jsManifest", comp.name, "manifest.json");
     if (!fs.existsSync(manifestPath)) {
-      todo(name, `组件 ${comp.name} 的 manifest.json 不存在：${manifestPath}（generateReleaseJsManifest 目前只生成第一个组件的）`);
+      todo(name, `component ${comp.name} has no manifest.json: ${manifestPath} (generateReleaseJsManifest only generates the first component)`);
     }
 
     // buildPath 必须带上 assets/js/<组件名> 这一层。
@@ -75,7 +75,7 @@ export async function run(taskContext) {
 
     if (!r.ok) {
       throw new Error(
-        `${name} 失败：组件 ${comp.name}（webpack 返回 ${r.code}）\n` +
+        `${name} failed: component ${comp.name} (webpack exited with ${r.code})\n` +
           (r.stderr ?? "").slice(-2000) +
           "\n" +
           (r.stdout ?? "").slice(-2000)
@@ -95,7 +95,7 @@ export async function run(taskContext) {
     // 实测（devdemo debug 22 个文件）397 ms，平均 18 ms/个，比每次 exec 起进程还快。
     const snapped = await generateJsSnapshot(buildDir);
     if (!snapped.count) {
-      throw new Error(`${name}: ${buildDir} 下没有生成任何 .js，webpack 产物不对`);
+      throw new Error(`${name}: no .js generated under ${buildDir}, the webpack output looks wrong`);
     }
   }
 

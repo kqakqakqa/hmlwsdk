@@ -19,7 +19,7 @@ export const name = "processReleaseProfile";
 export const produces = "process_profile/release/normal/config.json";
 
 export function run(taskContext) {
-  if (!taskContext.config) throw new Error(`${name}: 缺少 taskContext.config，必须先跑 mergeReleaseProfile`);
+  if (!taskContext.config) throw new Error(`${name}: missing taskContext.config, run mergeReleaseProfile first`);
 
   const outDir = path.join(taskContext.work, "process_profile", "release", "normal");
   const out = path.join(outDir, "config.json");

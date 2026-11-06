@@ -17,14 +17,14 @@ import path from "path";
 export function parseBuildGradle(moduleDir) {
   const file = path.join(moduleDir, "build.gradle");
   if (!fs.existsSync(file)) {
-    throw new Error(`找不到 ${file}，没法确定 compileSdkVersion / compatibleSdkVersion`);
+    throw new Error(`cannot find ${file}, unable to determine compileSdkVersion / compatibleSdkVersion`);
   }
 
   const src = fs.readFileSync(file, "utf8");
 
   const read = (key) => {
     const m = src.match(new RegExp(`\\b${key}\\s*=?\\s*(\\d+)`));
-    if (!m) throw new Error(`${file} 里没找到 ${key}`);
+    if (!m) throw new Error(`${key} not found in ${file}`);
     return Number(m[1]);
   };
 

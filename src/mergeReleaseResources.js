@@ -29,7 +29,7 @@ export const produces = "merge_res/release/merge_res_file.index";
 
 export function run(taskContext) {
   const mainDir = path.join(taskContext.moduleDir, "src", "main");
-  if (!fs.existsSync(mainDir)) todo(name, `${mainDir} 不存在，没法生成资源清单`);
+  if (!fs.existsSync(mainDir)) todo(name, `${mainDir} does not exist, cannot write the resource list`);
 
   const out = path.join(taskContext.work, "merge_res", "release", "merge_res_file.index");
   fs.mkdirSync(path.dirname(out), { recursive: true });

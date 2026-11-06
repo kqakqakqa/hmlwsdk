@@ -63,7 +63,7 @@ export function sortCertChain(certPems) {
   });
 
   const leaf = parsed.find((c) => !parsed.some((x) => x.issuer === c.subject));
-  if (!leaf) throw new Error("证书链里找不到叶子证书（可能全是自签名的）");
+  if (!leaf) throw new Error("no leaf certificate in the chain (they may all be self-signed)");
 
   const ordered = [];
   let cur = leaf;

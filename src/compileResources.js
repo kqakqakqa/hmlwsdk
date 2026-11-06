@@ -156,8 +156,8 @@ function collectClusterItems(config, cluster, moduleName) {
     const name = stripExtension(filename);
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       throw new Error(
-        `${cluster.cluster} 下的文件名 "${filename}" 去掉扩展名后不是合法资源名` +
-          `（只允许字母数字下划线，不能数字开头）`
+        `${cluster.cluster} file name "${filename}" is not a valid resource name once the extension is dropped` +
+          ` (letters, digits and underscores only, cannot start with a digit)`
       );
     }
     // 记录里存的是「模块名/资源簇/文件名」这样的相对路径，设备端按它去找资源
@@ -190,7 +190,7 @@ function assertNoDuplicate(limitKey, clusterName, items) {
   for (const item of items) {
     const key = item.resType + ":" + item.name;
     if (seen.has(key)) {
-      throw new Error(`${limitKey}/${clusterName} 里的资源 "${item.name}" 重复定义（同一限定目录下同名同类型只能有一份）`);
+      throw new Error(`duplicate resource "${item.name}" in ${limitKey}/${clusterName} (one resource per name and type in a config group)`);
     }
     seen.add(key);
   }

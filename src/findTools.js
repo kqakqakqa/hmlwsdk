@@ -40,10 +40,10 @@ export function resolveTools() {
   const missing = required.filter((p) => !fs.existsSync(p));
   if (missing.length) {
     throw new Error(
-      "src/ace-loader 缺构建工具。本 SDK 只用仓库自带的副本，不读系统安装的 SDK：\n  " +
+      "src/ace-loader is missing build tools. this SDK only uses the copy vendored in the repo, it never reads an installed SDK:\n  " +
         missing.join("\n  ") +
-        "\n\nace-loader 是 git submodule，克隆后要先 git submodule update --init，" +
-        "再到它目录里跑 npm install。"
+        "\n\nace-loader is a git submodule, run git submodule update --init after cloning, " +
+        "then run npm install inside its directory."
     );
   }
 

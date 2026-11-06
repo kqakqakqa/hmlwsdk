@@ -49,7 +49,7 @@ export function readZip(buf) {
       break;
     }
   }
-  if (eocd === -1) throw new Error("不是 zip：找不到 EOCD");
+  if (eocd === -1) throw new Error("not a zip: EOCD not found");
 
   const total = buf.readUInt16LE(eocd + 10);
   const cdOffset = buf.readUInt32LE(eocd + 16);
@@ -58,7 +58,7 @@ export function readZip(buf) {
   let p = cdOffset;
 
   for (let i = 0; i < total; i++) {
-    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error(`central directory 损坏，偏移 ${p}`);
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error(`corrupt central directory at offset ${p}`);
 
     const method = buf.readUInt16LE(p + 10);
     const compSize = buf.readUInt32LE(p + 20);
@@ -78,7 +78,7 @@ export function readZip(buf) {
     const content = method === 0 ? Buffer.from(body) : zlib.inflateRawSync(body);
 
     if (content.length !== rawSize) {
-      throw new Error(`${name} 解压后大小不符：${content.length} != ${rawSize}`);
+      throw new Error(`${name}: inflated size mismatch: ${content.length} != ${rawSize}`);
     }
 
     out.push({ name, content, size: rawSize, method });

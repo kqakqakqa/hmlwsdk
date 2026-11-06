@@ -66,21 +66,21 @@ export function parseElementJson(filePath) {
   const root = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const keys = Object.keys(root);
   if (keys.length !== 1) {
-    throw new Error(`${fileName} 的根节点必须只有一个资源类型键，实际有 ${keys.length} 个: ${keys.join(",")}`);
+    throw new Error(`${fileName}: the root must have exactly one resource type key, got ${keys.length}: ${keys.join(",")}`);
   }
 
   const typeName = keys[0];
   const resType = ELEMENT_TYPES[typeName];
   if (resType === undefined) {
-    throw new Error(`${fileName} 的根节点 "${typeName}" 不是资源类型`);
+    throw new Error(`${fileName}: the root key "${typeName}" is not a resource type`);
   }
   if (UNSUPPORTED_BY_API6.has(typeName)) {
-    throw new Error(`${typeName} 类型 api6 的 restool 不支持，本 SDK 也不支持（文件 ${fileName}）`);
+    throw new Error(`${typeName} is not supported by restool of api6, so this SDK does not support it either (file ${fileName})`);
   }
 
   const items = root[typeName];
   if (!Array.isArray(items)) {
-    throw new Error(`${fileName} 里 ${typeName} 必须是数组`);
+    throw new Error(`${fileName}: ${typeName} must be an array`);
   }
 
   return items.map((item) => {
@@ -92,10 +92,10 @@ export function parseElementJson(filePath) {
 
 function checkName(name, fileName) {
   if (typeof name !== "string" || name.length === 0) {
-    throw new Error(`${fileName} 里有资源缺 name`);
+    throw new Error(`${fileName}: a resource has no name`);
   }
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`${fileName} 里的资源名 "${name}" 含非法字符（只允许字母数字下划线，不能数字开头）`);
+    throw new Error(`${fileName}: resource name "${name}" has invalid characters (letters, digits and underscores only, cannot start with a digit)`);
   }
   return name;
 }
@@ -111,7 +111,7 @@ function checkName(name, fileName) {
  * 数组类资源的 value 段结尾会出现连续两个 \0。
  */
 function encodeValue(typeName, item, fileName, name) {
-  const where = `${fileName} 的 ${name}`;
+  const where = `${fileName}: ${name}`;
 
   switch (typeName) {
     case "string":
@@ -120,7 +120,7 @@ function encodeValue(typeName, item, fileName, name) {
     case "color":
       // restool 只校验 #RRGGBB / #AARRGGBB 这类写法，不转数字，原样存文本
       if (typeof item.value !== "string" || !/^#([0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(item.value)) {
-        throw new Error(`${where} 的颜色值 "${item.value}" 不合法`);
+        throw new Error(`${where}: color value "${item.value}" is invalid`);
       }
       return item.value;
 
@@ -129,50 +129,50 @@ function encodeValue(typeName, item, fileName, name) {
       return asString(item.value, where);
 
     case "boolean":
-      if (typeof item.value !== "boolean") throw new Error(`${where} 的 value 必须是 true/false`);
+      if (typeof item.value !== "boolean") throw new Error(`${where}: value must be true/false`);
       return String(item.value);
 
     case "integer":
       if (typeof item.value !== "number" || !Number.isInteger(item.value)) {
-        throw new Error(`${where} 的 value 必须是整数`);
+        throw new Error(`${where}: value must be an integer`);
       }
       return String(item.value);
 
     case "intarray":
-      if (!Array.isArray(item.value)) throw new Error(`${where} 的 value 必须是数组`);
+      if (!Array.isArray(item.value)) throw new Error(`${where}: value must be an array`);
       return composeStrings(
         item.value.map((v) => {
-          if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${where} 的数组元素必须是整数`);
+          if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${where}: array elements must be integers`);
           return String(v);
         }),
         false
       );
 
     case "strarray":
-      if (!Array.isArray(item.value)) throw new Error(`${where} 的 value 必须是数组`);
+      if (!Array.isArray(item.value)) throw new Error(`${where}: value must be an array`);
       return composeStrings(
         item.value.map((v) => asString(v?.value, where)),
         false
       );
 
     case "plural": {
-      if (!Array.isArray(item.value)) throw new Error(`${where} 的 value 必须是数组`);
+      if (!Array.isArray(item.value)) throw new Error(`${where}: value must be an array`);
       const quantities = new Set();
       const segments = [];
       for (const v of item.value) {
         const quantity = asString(v?.quantity, where);
-        if (quantities.has(quantity)) throw new Error(`${where} 的 quantity "${quantity}" 重复`);
+        if (quantities.has(quantity)) throw new Error(`${where}: duplicate quantity "${quantity}"`);
         quantities.add(quantity);
         // 每个数组项固定两段：先 quantity 再 value
         segments.push(quantity, asString(v?.value, where));
       }
-      if (!quantities.has("other")) throw new Error(`${where} 缺少 quantity 为 other 的项（restool 强制要求）`);
+      if (!quantities.has("other")) throw new Error(`${where}: missing the "other" quantity (restool requires it)`);
       return composeStrings(segments, false);
     }
 
     case "theme":
     case "pattern": {
-      if (!Array.isArray(item.value)) throw new Error(`${where} 的 value 必须是数组`);
+      if (!Array.isArray(item.value)) throw new Error(`${where}: value must be an array`);
       const segments = [];
       // parent 会作为第一段写进去，带 $ 前缀
       if (item.parent !== undefined) {
@@ -186,12 +186,12 @@ function encodeValue(typeName, item, fileName, name) {
     }
 
     default:
-      throw new Error(`${typeName} 类型还没有实现编码（${where}）`);
+      throw new Error(`${typeName} encoding is not implemented yet (${where})`);
   }
 }
 
 function asString(value, where) {
-  if (typeof value !== "string") throw new Error(`${where} 的 value 必须是字符串`);
+  if (typeof value !== "string") throw new Error(`${where}: value must be a string`);
   return value;
 }
 

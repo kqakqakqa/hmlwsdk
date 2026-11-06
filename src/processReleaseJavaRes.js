@@ -20,7 +20,7 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "processReleaseJavaRes";
-export const produces = "jarRes/release/ 目录（本工程是空的）";
+export const produces = "jarRes/release/ directory (empty in this project)";
 
 export function run(taskContext) {
   const outDir = path.join(taskContext.work, "jarRes", "release");
@@ -35,5 +35,5 @@ export function run(taskContext) {
     return outDir;
   }
 
-  todo(name, `有 ${jars.length} 个 jar 要处理（zipTree 解压 + 按 packageOptions.excludes 过滤），这部分还没写`);
+  todo(name, `${jars.length} jar(s) to process (unzip via zipTree + filter by packageOptions.excludes), this part is not written yet`);
 }

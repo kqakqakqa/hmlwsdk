@@ -20,7 +20,7 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "processReleaseLibsFile";
-export const produces = "libs/release/ 目录（本工程是空的）";
+export const produces = "libs/release/ directory (empty in this project)";
 
 export function run(taskContext) {
   const outDir = path.join(taskContext.work, "libs", "release");
@@ -47,5 +47,5 @@ export function run(taskContext) {
     return outDir;
   }
 
-  todo(name, `找到 ${found.length} 个 .so（${found.slice(0, 3).join(", ")}），复制逻辑还没写`);
+  todo(name, `found ${found.length} .so (${found.slice(0, 3).join(", ")}), the copy logic is not written yet`);
 }

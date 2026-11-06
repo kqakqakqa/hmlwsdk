@@ -17,7 +17,7 @@ import { todo } from "./createTaskContext.js";
  */
 
 export const name = "validateReleaseDistroFilterTask";
-export const produces = "无产物，纯校验";
+export const produces = "no output, validation only";
 
 export function run(taskContext) {
   const entries = taskContext.entryModules ?? [taskContext.moduleDir];
@@ -29,6 +29,6 @@ export function run(taskContext) {
 
   todo(
     name,
-    `有 ${entries.length} 个 entry 模块，要做 deviceType 分桶 + distroFilter 三维度互斥校验，还没写`
+    `${entries.length} entry modules, this needs deviceType bucketing plus the three-dimensional distroFilter exclusivity check, not written yet`
   );
 }

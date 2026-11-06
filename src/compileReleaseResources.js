@@ -36,7 +36,7 @@ export const name = "compileReleaseResources";
 export const produces = "res/release/normal/lite/resources.index + R.txt + resources/";
 
 export function run(taskContext) {
-  if (!taskContext.paths.processProfile) todo(name, "缺少 processProfile 产出的 config.json");
+  if (!taskContext.paths.processProfile) todo(name, "missing config.json from processProfile");
 
   const outDir = path.join(taskContext.work, "res", "release", "normal", "lite");
 

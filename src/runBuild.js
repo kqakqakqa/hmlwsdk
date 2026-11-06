@@ -16,7 +16,7 @@ import { DEPENDS, findTask } from "./registerTasks.js";
  */
 export function resolveOrder(target) {
   if (!DEPENDS[target]) {
-    throw new Error(`没有这个任务：${target}\n可用的入口有：${Object.keys(DEPENDS).join(", ")}`);
+    throw new Error(`no such task: ${target}\navailable entry tasks: ${Object.keys(DEPENDS).join(", ")}`);
   }
 
   const order = [];
@@ -25,8 +25,8 @@ export function resolveOrder(target) {
 
   function visit(name) {
     if (done.has(name)) return;
-    if (stack.has(name)) throw new Error(`依赖成环了：${name}`);
-    if (!DEPENDS[name]) throw new Error(`依赖表里缺这个任务：${name}`);
+    if (stack.has(name)) throw new Error(`dependency cycle: ${name}`);
+    if (!DEPENDS[name]) throw new Error(`task missing from the DEPENDS table: ${name}`);
 
     stack.add(name);
     for (const dep of DEPENDS[name]) visit(dep);
@@ -63,7 +63,7 @@ export async function runBuild(taskContext, target, log = console.log) {
   const order = resolveOrder(target);
   const results = [];
 
-  log(`── ${target}：要跑 ${order.length} 个任务 ────────────────`);
+  log(`── ${target}: ${order.length} task(s) to run ────────────────`);
 
   for (const name of order) {
     const task = findTask(name);
@@ -83,6 +83,6 @@ export async function runBuild(taskContext, target, log = console.log) {
     }
   }
 
-  log(`── 完成：${results.length} 个任务全部执行 ────────────────`);
+  log(`── done: all ${results.length} task(s) executed ────────────────`);
   return { ok: true, results };
 }

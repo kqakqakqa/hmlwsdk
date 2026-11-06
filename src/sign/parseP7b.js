@@ -28,17 +28,17 @@ export function parseP7b(buf) {
   const json = JSON.parse(Buffer.from(sd.econtent.content.hex, "hex").toString());
 
   const info = json["bundle-info"];
-  if (!info) throw new Error("p7b 里没有 bundle-info，确认这是 HarmonyOS 的 profile 文件");
+  if (!info) throw new Error("p7b has no bundle-info, make sure this is a HarmonyOS profile file");
 
   const leafCertPem = info["development-certificate"] ?? info["distribution-certificate"];
   if (!leafCertPem) {
     throw new Error(
-      "p7b 的 bundle-info 里既没有 development-certificate 也没有 distribution-certificate"
+      "bundle-info of the p7b has neither development-certificate nor distribution-certificate"
     );
   }
 
   const notBefore = json.validity?.["not-before"];
-  if (typeof notBefore !== "number") throw new Error("p7b 里没有 validity.not-before");
+  if (typeof notBefore !== "number") throw new Error("p7b has no validity.not-before");
 
   return {
     bundleName: info["bundle-name"],

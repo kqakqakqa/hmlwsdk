@@ -34,8 +34,8 @@ export function compileJs(opts) {
   const webpackBin = path.join(tools.aceLoader, "node_modules", "webpack", "bin", "webpack.js");
   const webpackConfig = path.join(tools.aceLoader, "webpack.lite.config.js");
 
-  if (!fs.existsSync(webpackBin)) throw new Error(`找不到 webpack：${webpackBin}`);
-  if (!fs.existsSync(webpackConfig)) throw new Error(`找不到 webpack 配置：${webpackConfig}`);
+  if (!fs.existsSync(webpackBin)) throw new Error(`webpack not found: ${webpackBin}`);
+  if (!fs.existsSync(webpackConfig)) throw new Error(`webpack config not found: ${webpackConfig}`);
 
   fs.mkdirSync(opts.buildDir, { recursive: true });
 

@@ -22,22 +22,22 @@ export function loadPrivateKey(config = {}) {
 
   if (config.p12) return readP12Key(config.p12, config.password);
 
-  throw new Error("缺少签名私钥：用 --key <pem> 指定，或用 --p12 <p12> --p12pwd <密码>");
+  throw new Error("missing signing key: pass --key <pem>, or --p12 <p12> --p12pwd <password>");
 }
 
 function readPemKey(file) {
-  if (!fs.existsSync(file)) throw new Error(`私钥文件不存在：${file}`);
+  if (!fs.existsSync(file)) throw new Error(`private key file not found: ${file}`);
   const pem = fs.readFileSync(file, "utf8");
   const key = crypto.createPrivateKey(pem);
   return { pem: key.export({ type: "pkcs8", format: "pem" }), source: file };
 }
 
 function readP12Key(file, password) {
-  if (!fs.existsSync(file)) throw new Error(`私钥文件不存在：${file}`);
+  if (!fs.existsSync(file)) throw new Error(`private key file not found: ${file}`);
   if (password === undefined) {
-    throw new Error(`${file} 是 PKCS#12，必须给密码（--p12pwd）`);
+    throw new Error(`${file} is PKCS#12, a password is required (--p12pwd)`);
   }
   const raw = fs.readFileSync(file);
   const key = crypto.createPrivateKey({ key: raw, format: "pkcs12", passphrase: password });
-  return { pem: key.export({ type: "pkcs8", format: "pem" }), source: `${file}（密码校验通过）` };
+  return { pem: key.export({ type: "pkcs8", format: "pem" }), source: `${file} (password verified)` };
 }
