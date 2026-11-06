@@ -1,107 +1,104 @@
 #!/usr/bin/env node
+import path from "path";
+import { fileURLToPath } from "url";
+
 import { build } from "../src/build.js";
+import { initProject } from "../src/initProject.js";
+import { readProjectConfig } from "../src/readProjectConfig.js";
 
 /**
  * hmlwsdk 命令行入口
  *
- *   hmlwsdk buildBin <工程目录>
- *   hmlwsdk buildApp <工程目录>
- *   hmlwsdk buildSignedHap <工程目录> --p7b my.p7b --key private-pkcs8.pem
- *   hmlwsdk buildSignedApp <工程目录> --p7b my.p7b --p12 mystore.p12 --p12pwd 123456
+ *   hmlwsdk init            [工程目录]
+ *   hmlwsdk buildBin        [工程目录]
+ *   hmlwsdk buildApp        [工程目录]
+ *   hmlwsdk buildSignedHap  [工程目录]
+ *   hmlwsdk buildSignedApp  [工程目录]
  *
- * 四条命令 = 两个停止点（.bin / hap 或 .app）× 有没有签名配置：
+ * 工程目录可以省略 —— 省略时从 cwd 向上找含 entry/src/main/config.json 的那一层，
+ * 所以在工程里的任何子目录下都能直接跑。
  *
- *   buildBin         出 .bin
- *   buildApp         出 .app（顺带出文件树形态的 hap、.bin）
- *   buildSignedHap   出「里面那个 .bin 已签名」的 hap，必须给 --p7b
- *   buildSignedApp   出签名后的 .app，必须给 --p7b
+ * **签名材料不走参数**，统一从 <工程>/cert/ 读（细节见 src/readSigningConfig.js）：
+ *   cert/*.p7b + cert/*.p12 或 *.pem   名字唯一时直接丢进去就完事
+ *   cert/signing.config.js             自动发现的结果回写在这里，也可手写
  *
- * buildBin / buildApp 给了 --p7b 也会顺带签名，与 Gradle 的行为一致
- * （没配 signingConfig 就只出 unsigned）。
+ * 四条 build 命令：
+ *   buildBin        出 .bin
+ *   buildApp        出 .app（顺带出 .bin 形态的 hap、.bin），cert/ 有材料就签
+ *   buildSignedHap  出「里面那个 .bin 已签名」的 hap，要求 cert/ 有材料
+ *   buildSignedApp  出签名后的 .app，要求 cert/ 有材料
  *
- * 签名相关参数：
- *   --p7b <file>      必给，HarmonyOS profile
- *   --p12 <file>      PKCS#12 私钥库，配合 --p12pwd
- *   --p12pwd <pwd>    p12 密码
- *   --key <file>      直接给 PEM 私钥（和 --p12 二选一）
- *   --cert <file>     替换内置的华为根+中间证书链
- *
- * 工程目录指模块目录的上一级，例如 apps/devdemo/devdemo（里面有 entry/）。
+ * 最终产物落在 <工程>/build/ 根：<bundleName>.app、<bundleName>.hap（单 .bin 形态），
+ * 中间产物在 <工程>/build/hmlwsdk/ 下。
  */
 
-const argv = process.argv.slice(2);
-const flags = {};
-const args = [];
+/** 本文件在 <SDK>/bin 下，往上一级就是 SDK 根 */
+const SDK_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === "--work") flags.work = argv[++i];
-  else if (argv[i] === "--p7b") flags.p7b = argv[++i];
-  else if (argv[i] === "--p12") flags.p12 = argv[++i];
-  else if (argv[i] === "--p12pwd") flags.p12pwd = argv[++i];
-  else if (argv[i] === "--key") flags.key = argv[++i];
-  else if (argv[i] === "--cert") flags.cert = argv[++i];
-  else args.push(argv[i]);
-}
+const args = process.argv.slice(2);
 
 /**
  * 命令名 → build() 的 target
  *
- * needsSigning：命令名承诺了要出签名产物，不给 --p7b 直接报错。
- * 静默退回 unsigned 是坑
+ * 两个 signed* 承诺出签名产物，cert/ 里没材料时 build() 直接报错（静默退回
+ * unsigned 是坑）；另外两条是「有材料就签」，对应 Gradle 的「配了 signingConfig 才签」。
  */
 const COMMANDS = {
+  init: {},
   buildBin: { target: "bin" },
   buildApp: { target: "app" },
-  buildSignedHap: { target: "signedHap", needsSigning: true },
-  buildSignedApp: { target: "signedApp", needsSigning: true }
+  buildSignedHap: { target: "signedHap" },
+  buildSignedApp: { target: "signedApp" }
 };
 
 function printUsage() {
-  console.error("usage: hmlwsdk <command> <project-dir> [options]");
+  console.error("usage: hmlwsdk <command> [project-dir]");
   console.error(`commands: ${Object.keys(COMMANDS).join("  ")}`);
+  console.error("  init             把工程初始化成一条命令出包（生成 config / cert / build 目录）");
   console.error("  buildBin         .bin");
-  console.error("  buildApp         .app（含文件树形态的 hap、.bin）");
-  console.error("  buildSignedHap   里面那个 .bin 已签名的 hap（要 --p7b）");
-  console.error("  buildSignedApp   签名后的 .app（要 --p7b）");
-  console.error("example: hmlwsdk buildSignedHap /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem");
+  console.error("  buildApp         .app（含 .bin 形态的 hap、.bin），cert/ 有材料就签");
+  console.error("  buildSignedHap   里面那个 .bin 已签名的 hap（要求 cert/ 有材料）");
+  console.error("  buildSignedApp   签名后的 .app（要求 cert/ 有材料）");
+  console.error("");
+  console.error("project-dir 省略时从当前目录向上找含 entry/src/main/config.json 的那一层");
+  console.error("example: hmlwsdk init           在工程根执行一次");
+  console.error("         hmlwsdk buildApp       之后随时跑，签名材料从 cert/ 读");
 }
 
 const command = args[0];
-const projectDir = args[1];
-const spec = COMMANDS[command];
+const projectArg = args[1];
+const spec = command ? COMMANDS[command] : undefined;
+
+if (!command || command === "--help" || command === "-h") {
+  printUsage();
+  process.exit(command ? 0 : 1);
+}
 
 if (!spec) {
-  if (command) console.error(`unknown command: ${command}`);
+  console.error(`unknown command: ${command}`);
   printUsage();
   process.exit(1);
 }
 
-if (spec.needsSigning && !flags.p7b) {
-  console.error(`${command} produces a signed artifact, but no --p7b was given (--p7b plus either --p12 + --p12pwd or --key)`);
-  process.exit(1);
-}
-
-if (!projectDir) {
-  console.error("missing project dir. usage: hmlwsdk <command> <project-dir>");
-  process.exit(1);
-}
-
-// 没给 p7b 就是"不签"，与 Gradle 没配 signingConfig 的行为一致
-const signingConfig = flags.p7b
-  ? { p7b: flags.p7b, p12: flags.p12, password: flags.p12pwd, keyFile: flags.key, certPath: flags.cert }
-  : undefined;
-
-let outputs;
 try {
-  outputs = await build({ projectDir, target: spec.target, work: flags.work, signingConfig });
+  if (command === "init") {
+    initProject({ dir: projectArg, sdkDir: SDK_DIR });
+  } else {
+    // 先读 hmlwsdk.config.js：拿工程根和该用哪个 node（缺失时这里就会给出人话提示）
+    const config = await readProjectConfig(projectArg);
+    const outputs = await build({ projectDir: config.root, target: spec.target, node: config.node });
+    printOutputs(outputs);
+  }
 } catch (e) {
-  console.error(`\nbuild failed: ${e.message}`);
+  console.error(`\n${command} failed: ${e.message}`);
   process.exit(1);
 }
 
-console.log("\noutputs:");
-for (const [kind, p] of Object.entries(outputs)) {
-  if (kind === "target" || kind === "work") continue;
-  console.log(`  ${kind.padEnd(10)} ${p}`);
+function printOutputs(outputs) {
+  console.log("\noutputs:");
+  for (const [kind, p] of Object.entries(outputs)) {
+    if (kind === "target" || kind === "work") continue;
+    console.log(`  ${kind.padEnd(14)} ${p}`);
+  }
+  console.log(`\nwork dir: ${outputs.work}`);
 }
-console.log(`\nwork dir: ${outputs.work}`);

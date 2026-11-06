@@ -36,6 +36,7 @@ import { generateJsSnapshot } from "./generateJsSnapshot.js";
  * @param {object} opts.config      加工过的 config（需要 module.js / app / module.deviceType）
  * @param {string} opts.work        work 目录，manifest 和 webpack 缓存写在这下面
  * @param {string} opts.sourceRoot  webpack 的产物根，会写成 sourceRoot/assets/js/<组件>/
+ * @param {string} [opts.node]      跑 webpack 用哪个 node，默认由 runWebpack 自己探
  * @param {string} [opts.iconDir]   资源编译产出的 resources/ 目录，有的话把里面的 png 也转成 .bin
  * @returns {Promise<string>} sourceRoot
  */
@@ -62,6 +63,9 @@ export async function compileJs(opts) {
       moduleRoot,
       buildDir,
       manifestPath,
+      // 用哪个 node 跑 webpack。给了就用（来自 hmlwsdk.config.js 的 node），
+      // 没给由 runWebpack 自己探（process.execPath 优先）
+      node: opts.node,
       // resources 下的 png 也要转成 .bin，靠 img2bin 的 iconPath 环境变量。
       // 资源编译没跑过时这个目录不存在，就不传。
       iconPath: opts.iconDir && fs.existsSync(opts.iconDir) ? opts.iconDir : undefined,

@@ -3,7 +3,9 @@
 纯 JavaScript 实现的 HarmonyOS **liteWearable（轻智能手表）**应用打包链。输入一个标准 DevEco 工程目录，输出 `.bin`、hap 和 `.app`。
 
 ```bash
-hmlwsdk buildSignedApp /path/to/your/project --p7b my.p7b --key private-pkcs8.pem
+cd /path/to/your/project
+hmlwsdk init                 # 一次性：生成 hmlwsdk.config.js / build.config.js / cert/ / hmlwsdk.build.js
+hmlwsdk buildSignedApp       # 之后随时跑，签名材料从 cert/ 读，产物落在 build/
 ```
 
 运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不依赖 native 二进制。
@@ -49,7 +51,7 @@ hmlwsdk buildSignedApp /path/to/your/project --p7b my.p7b --key private-pkcs8.pe
 ### 规模与耗时
 
 Gradle 的 `assembleRelease` 实测进 117 个 task。这里没有任务系统，`src/build.js` 一条顺序函数走完，
-按命令不同是 6~10 步（`buildBin` 6 步、`buildApp` 8 步、`buildSignedApp` 10 步，给了 `--p7b` 各加一步签名）。
+按命令不同是 6~10 步（`buildBin` 6 步、`buildApp` 8 步、`buildSignedApp` 10 步，`cert/` 里有签名材料时各加一步签名）。
 
 实测 devdemo 的 release 全链，资源编译 66 ms、webpack 5.3 s，其余步骤都在毫秒级。
 
@@ -96,7 +98,8 @@ export PATH="/path/to/hmlwsdk/bin:$PATH"
 ```
 
 ```bash
-hmlwsdk buildBin /path/to/project
+hmlwsdk init
+hmlwsdk buildBin
 ```
 
 `bin/` 下有三个文件，都是入口，只是装法不同：
@@ -111,7 +114,7 @@ hmlwsdk buildBin /path/to/project
 
 ```bash
 npm link
-hmlwsdk buildBin /path/to/project
+cd /path/to/project && hmlwsdk init
 ```
 
 如果克隆时忘了 `--recursive`：
@@ -131,17 +134,49 @@ PNG 压缩用 Node 内置的 `node:zlib`，不额外引包。压缩参数按 lib
 ## 快速开始
 
 ```bash
-# 只出 .bin
-hmlwsdk buildBin /path/to/apps/devdemo/devdemo
+# 一次性初始化：在工程根跑（就是含 entry/ 的那一层）
+hmlwsdk init
 
-# 出 .app（顺带把两种 hap 和 .bin 都出了）
-hmlwsdk buildApp /path/to/apps/devdemo/devdemo
+# 之后在工程里任何目录下都能直接跑 —— 工程根靠 entry/src/main/config.json 向上找
+hmlwsdk buildBin         # 只出 .bin
+hmlwsdk buildApp         # 出 .app + 单 .bin 形态的 hap，cert/ 里有签名材料就签
+hmlwsdk buildSignedHap   # 出「里面那个 .bin 已签名」的 hap（要求 cert/ 有材料）
+hmlwsdk buildSignedApp   # 出签名的 .app（要求 cert/ 有材料）
+```
 
-# 出「里面那个 .bin 已签名」的 hap
-hmlwsdk buildSignedHap /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
+init 之后工程里多出这些东西，**都不用传参数了**：
 
-# 出签名的 app
-hmlwsdk buildSignedApp /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
+```
+hmlwsdk.config.js     ← 不进版本库：本机 hmlwsdk 的路径 + 用哪个 node
+build.config.js       ← 进版本库：compileSdkVersion / compatibleSdkVersion
+hmlwsdk.build.js      ← 进版本库：npm run build 的入口
+cert/                 ← 进版本库的只有 .gitignore，签名材料丢在这里
+  .gitignore
+  signing.p7b         ← 你放进去的 profile
+  signing.p12         ← 你放进去的私钥库（或 signing.pem）
+  signing.config.js   ← 自动生成：p7b / p12 / password
+build/                ← 产物，只有 .gitignore 进版本库
+  <bundleName>.app
+  <bundleName>.hap
+  hmlwsdk/            ← 中间产物
+```
+
+`init` 只加文件，不动 `entry/`、`build.gradle`、`gradlew` —— DevEco 那边照旧能用。
+重复跑是幂等的：已有文件只跳过不覆盖。
+
+`build/.gitignore` 与 `cert/.gitignore` 内容一样（`*` + `!.gitignore`）。注意 DevEco 生成的
+工程根 `.gitignore` 里是 `/build`（整目录忽略），父目录被忽略后 git 不会进这个目录，所以
+`build/.gitignore` 本身也不会进版本库 —— 这不影响什么，构建时会自己建目录；对没有这条规则的
+工程它就正常起作用。
+
+`package.json` 会被补上 `"type": "module"`（生成的 `.js` 用 ESM 语法，DevEco 默认的
+`package.json` 是 `{}`，没有这个字段 Node 会把它们当 CommonJS 而报语法错）和四个 scripts：
+
+```bash
+npm run build        # = node hmlwsdk.build.js，等价于 buildApp
+npm run build:bin
+npm run build:hap
+npm run build:app
 ```
 
 ---
@@ -151,20 +186,29 @@ hmlwsdk buildSignedApp /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-
 ### 基本形式
 
 ```
-hmlwsdk <命令> <工程目录> [选项]
+hmlwsdk <命令> [工程目录]
 ```
 
-四条命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名配置。
+工程目录可以省略 —— 省略时从当前目录向上找含 `entry/src/main/config.json` 的那一层。
+**没有任何签名相关参数**：签名材料统一从 `<工程>/cert/` 读。
+
+四条命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名材料。
 
 | 命令 | 做什么 | 产出（相对 work） |
 |---|---|---|
+| `init` | 把工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
 | `buildBin` | 只构建 `.bin` | `bin/entry-release-unsigned.bin` |
 | `buildApp` | 构建到 `.app`，顺带把两种 hap 和 `.bin` 都出了 | `app/<工程名>-release-unsigned.app` + `pack.info`<br>`hap/entry-bin-release-lite-unsigned.hap`<br>`hap/entry-release-lite-unsigned.hap`<br>`bin/entry-release-unsigned.bin` |
 | `buildSignedHap` | 构建 + 签名，出可以装表的 hap | `hap/entry-bin-release-lite-signed.hap` |
 | `buildSignedApp` | 构建 + 签名，出签名的 `.app` | `app/<工程名>-release-signed.app` |
 
-`buildSignedHap` / `buildSignedApp` **必须给 `--p7b`**，不给直接报错 —— 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
-`buildBin` / `buildApp` 给了 `--p7b` 也会顺带签名，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
+`buildSignedHap` / `buildSignedApp` **要求 `cert/` 里真有签名材料**，没有直接报错 ——
+命令名承诺了要出签名产物，静默退回 unsigned 是坑。
+`buildBin` / `buildApp` 有材料就顺带签，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
+
+不管哪条命令，最终产物都会拷一份到 `<工程>/build/` 根并改名成 `<bundleName>.app` /
+`<bundleName>.hap`（后者是单 `.bin` 形态、设备直接装的那个）。中间产物留在
+`build/hmlwsdk/` 里。
 
 **没有单独的签名命令，也没有 `buildHap`。** 未签名的 hap 和 `.bin` 都是中间产物，照样留在 work 目录里。
 
@@ -181,34 +225,22 @@ buildSignedApp → signedApp
 
 | 步骤 | 做什么 | 产出（相对 work） |
 |---|---|---|
-| `read project` | 读 build.gradle 的版本号 + 源码 config.json | 无 |
+| `read project` | 读 build.config.js（缺则回退 build.gradle）的版本号 + 源码 config.json | 无 |
+| `read signing` | 读 `cert/`，自动发现 p7b / 私钥 / 密码 | 无（回写 `cert/signing.config.js`） |
 | `merge config` | 注入 apiVersion、abilities 默认值 | 无（传对象，不落盘） |
 | `compile resources` | 编译资源（JS 实现，原 restool 的活） | `source/assets/entry/resources.index` + `resources/`<br>`R.txt` |
 | `compile js` | node + webpack 编译，再出 `.bc` | `source/assets/js/<组件>/*.js` `*.bc`<br>`manifest/<组件>/manifest.json` |
 | `assemble assets` | 回填资源 id、定型 config、删多余文件 | `source/config.json` |
 | `write bin` | 打成 `.bin` 私有容器 | `bin/entry-release-unsigned.bin` |
-| `sign bin` | 签 `.bin`（有 `--p7b` 才跑） | `bin/entry-release-signed.bin` |
+| `sign bin` | 签 `.bin`（`cert/` 有材料才跑） | `bin/entry-release-signed.bin` |
 | `pack bin hap` | `.bin` 装进 hap —— **设备直接装的就是这种** | `hap/entry-bin-release-lite-unsigned.hap` |
 | `pack tree hap` | 文件树形态的 hap，只进 `.app` | `hap/entry-release-lite-unsigned.hap` |
 | `pack app` | 打 `.app` | `app/<工程名>-release-unsigned.app` + `pack.info` |
-| `sign app` | 签 `.app`（有 `--p7b` 才跑） | `app/<工程名>-release-signed.app` |
+| `sign app` | 签 `.app`（`cert/` 有材料才跑） | `app/<工程名>-release-signed.app` |
 
 中间态一律用变量传，不落盘：资源直接编译进 `source/assets/entry`（没有独立的资源输出目录再拷一遍），
 `.bin` 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。必须落盘的只有三类 ——
 webpack 的输入 manifest、webpack 的输出目录、最终产物；前两个是因为 webpack 是独立进程，只能靠文件系统交接。
-
-### 选项
-
-| 选项 | 说明 |
-|---|---|
-| `--work <目录>` | 中间产物目录，默认 `<工程目录>/build/hmlwsdk` |
-| `--p7b <文件>` | HarmonyOS profile。`buildSignedHap` / `buildSignedApp` 必给；`buildBin` / `buildApp` 给了才签 |
-| `--p12 <文件>` | PKCS#12 私钥库，配合 `--p12pwd` |
-| `--p12pwd <密码>` | p12 密码 |
-| `--key <文件>` | 直接给 PEM 私钥，与 `--p12` 二选一 |
-| `--cert <文件>` | 替换内置的华为根 + 中间证书链 |
-
-`buildBin` / `buildApp` 不给 `--p7b` 就是「不签」，与 Gradle 没配 `signingConfig` 时的行为一致 —— 出 unsigned 包，下游拿 unsigned 当 signed 用。
 
 ### 示例
 
@@ -216,16 +248,11 @@ webpack 的输入 manifest、webpack 的输出目录、最终产物；前两个�
 # 只出 .bin，不签名
 hmlwsdk buildBin apps/devdemo/devdemo
 
-# 出签名的 app，PKCS#12 私钥库
-hmlwsdk buildSignedApp apps/devdemo/devdemo \
-  --p7b my.p7b --p12 my.p12 --p12pwd 123456
+# 出签名的 app —— 签名材料在 apps/devdemo/devdemo/cert/ 里
+hmlwsdk buildSignedApp apps/devdemo/devdemo
 
-# 出签名的 hap，裸 PEM 私钥
-hmlwsdk buildSignedHap apps/devdemo/devdemo \
-  --p7b my.p7b --key private-pkcs8.pem
-
-# 中间产物放到别处
-hmlwsdk buildApp apps/devdemo/devdemo --work /tmp/hmlw-build
+# 当前目录就是工程（或它的子目录），参数全省
+hmlwsdk buildApp
 ```
 
 ---
@@ -256,18 +283,30 @@ hmlwsdk buildApp apps/devdemo/devdemo --work /tmp/hmlw-build
 
 组件目录下**不需要**放 `manifest.json` —— 那是 `compile js` 按 `config.json` 拼出来传给 webpack 当 `aceManifestPath` 的。
 
-CLI 启动时会检查 `entry/src/main/config.json` 存在，不存在直接报错退出。
+CLI 启动时会从当前目录向上找 `entry/src/main/config.json`，找不到直接报错退出。
 
-### build.gradle 的两个字段
+### 版本号：build.config.js 或 build.gradle
+
+两个 SDK 版本号决定 `config.json` 里的 `app.apiVersion.target` / `.compatible`：
+
+```js
+// <工程目录>/build.config.js —— init 生成，优先读这个
+export default {
+  compileSdkVersion: 6,
+  compatibleSdkVersion: 3
+};
+```
+
+没有 `build.config.js` 时回退读模块的 `entry/build.gradle`：
 
 ```
 compileSdkVersion 6
 compatibleSdkVersion 3
 ```
 
-`key value` 和 `key = value` 两种写法都认。这两个值决定 `config.json` 里的 `app.apiVersion.target` / `.compatible`。
+`key value` 和 `key = value` 两种写法都认。字段可以只写一个 —— 缺的那个回退另一处。
 
-**读不到就报错，不猜默认值** —— 静默用错版本比直接失败更难查（早先这两个值写死成 6 / 3，换个工程 `apiVersion` 就是错的）。
+**两处都读不到就报错，不猜默认值** —— 静默用错版本比直接失败更难查（早先这两个值写死成 6 / 3，换个工程 `apiVersion` 就是错的）。
 
 ### config.json
 
@@ -293,12 +332,22 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 | 产物 | 路径（相对 work） | 说明 |
 |---|---|---|
 | `.bin`（未签名） | `bin/entry-release-unsigned.bin` | 私有容器，设备真正验签的对象 |
-| `.bin`（签名） | `bin/entry-release-signed.bin` | 有 `--p7b` 时才有 |
+| `.bin`（签名） | `bin/entry-release-signed.bin` | `cert/` 里有签名材料时才有 |
 | hap（`.bin` 形态） | `hap/entry-bin-release-lite-unsigned.hap` | 单条目，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
 | hap（`.bin` 形态，已签名） | `hap/entry-bin-release-lite-signed.hap` | `buildSignedHap` 的产物：里面那个 `.bin` 已签名，**不带 zip 签名块**。Gradle 的同名产物会多插一个 `HAP Sig Block 42`（实测差 6585 B），本 SDK 不插，理由见[签名](#签名) |
 | hap（文件树形态） | `hap/entry-release-lite-unsigned.hap` | 所有源文件打平成一个 zip（devdemo 实测 92 个条目），全部 stored，无目录条目。只进 `.app` |
 | `.app`（未签名） | `app/<工程名>-release-unsigned.app` | 装一份文件树形态 hap + `pack.info`，deflate 压缩 |
-| `.app`（签名） | `app/<工程名>-release-signed.app` | 有 `--p7b` 时才有 |
+| `.app`（签名） | `app/<工程名>-release-signed.app` | `cert/` 里有签名材料时才有 |
+
+上面这些都是 `build/hmlwsdk/` 下的中间产物。**实际给人用的是拷到工程根 `build/` 的两份**，
+命名用 `config.json` 里的 `bundleName`：
+
+| 路径 | 内容 |
+|---|---|
+| `build/<bundleName>.hap` | 单 `.bin` 形态，设备直接装它（签名版或未签版，取决于 `cert/`） |
+| `build/<bundleName>.app` | 签名版或未签版，同上 |
+
+例：`bundleName` 是 `com.example.demo` 时，产出 `build/com.example.demo.app` 和 `build/com.example.demo.hap`。
 
 注意两点：
 
@@ -365,13 +414,14 @@ work/
                                                             └→ 打 hap（文件树）→ 打 .app → 签 .app
 ```
 
-`target` 决定停在哪个产物上。表里「有 `--p7b` 才跑」的那两步，对应 Gradle 没配 `signingConfig` 就出 unsigned 的行为。
+`target` 决定停在哪个产物上。表里「`cert/` 有材料才跑」的那两步，对应 Gradle 没配 `signingConfig` 就出 unsigned 的行为。
 
 ### 每步做的具体事
 
 | 步骤 | 关键点 |
 |---|---|
-| `read project` | 从模块的 `build.gradle` 读 `compileSdkVersion` / `compatibleSdkVersion`，读不到直接报错，不猜默认值 |
+| `read project` | 版本号先从 `build.config.js` 读，缺的字段回退模块的 `build.gradle`，两处都没有直接报错，不猜默认值 |
+| `read signing` | 读 `<工程>/cert/`：先看 `signing.config.js`，缺的字段扫目录取唯一的 `.p7b` / `.p12` / `.pem` 并回写。密码没写就拿 p12 文件名试。细节见[签名](#签名) |
 | `merge config` | 按 `build.gradle` 填 `app.apiVersion`、release **不写** `deviceConfig.default.debug`、`abilities` 里缺 `homeAbility` 的补 `false`。Gradle 的 `processProfile` 那一步实测只调键顺序，已合并到这里 |
 | `compile resources` | 直接编进 `source/assets/entry`。扫 `resources/` → 发 id → 写 `resources.index` / `R.txt` / 复制文件 / 压缩 PNG |
 | `compile js` | `aceModuleRoot` 必须是**组件目录**（`src/main/js/<组件>`），传 `src/main` 会直接报 `missing app.js`。产物目录必须带 `assets/js/<组件名>` 这一层，否则 webpack 把 `app.js` 写在根下，与 Gradle 结构差 83 个条目。每个组件自己拼一份 manifest，不落成独立的中间产物 |
@@ -397,6 +447,47 @@ work/
 
 ## 签名
 
+### 签名材料从哪来 —— `cert/` 目录
+
+`buildSignedHap` / `buildSignedApp` 不带任何参数，签名材料全在工程根的 `cert/` 里：
+
+```
+cert/
+  .gitignore           ← 忽略自己以外的一切
+  signing.p7b          ← profile
+  signing.p12          ← PKCS#12 私钥库（也可以换成签名.pem）
+  signing.config.js    ← 自动生成/更新，也可以手写
+```
+
+找的规则（实现在 `src/readSigningConfig.js`）：
+
+| 情况 | 行为 |
+|---|---|
+| `cert/` 不存在，或里面没有 `.p7b` | 这个工程不签名，`buildBin` / `buildApp` 出 unsigned |
+| 有 `.p7b` 但没有私钥 | 报错 —— 放了 profile 就说明想签，缺私钥不能静默跳过 |
+| `signing.config.js` 里写了路径 | 用它，文件必须真实存在 |
+| 没写 | 扫 `cert/` 顶层，取唯一的一个 `.p7b` 和唯一的一个 `.p12` / `.pem` |
+| 同名文件有多个 | 报错并列出候选，要求在 `signing.config.js` 里点名 |
+| 密码没写 | 拿 **p12 的文件名**试两个候选：`signing.p12` 和 `signing` |
+
+发现成功的结果会**回写** `cert/signing.config.js`（含明文密码，所以它放在被 ignore 的
+`cert/` 里，永远不进版本库）。下次直接读它，不再扫目录。
+
+两种私钥格式都支持，任何 Node 18+ 都能用：
+
+| 格式 | 处理 |
+|---|---|
+| `.pem`（PKCS#8） | 明文私钥，`crypto.createPrivateKey` 直接读 |
+| `.p12` / `.pfx` | 加密容器，`src/sign/parseP12.js` 解开：PBES2 用 Node 内置的 `pbkdf2` + `aes-cbc` 解外层，里层的 EncryptedPrivateKeyInfo 交给 `crypto.createPrivateKey` |
+
+`parseP12.js` 是自己写的（约 150 行），因为现成的库都不合适：Node 直到 26.10 才有
+`crypto.parsePKCS12()`；`node-forge` 只认老式 PBE-SHA1-3DES，而 DevEco / openssl 3 /
+Java 11+ 导出的 p12 都是 PBES2 + PBKDF2(HMAC-SHA256) + AES-256-CBC，实测它能过 MAC 校验
+却解不出内容。实测对照：自解出的私钥导出 PKCS#8 PEM 后，与
+`openssl pkcs12 -nocerts -nodes` 的结果逐字节相同。
+
+只认 PBES2。碰到老式 PKCS#12 PBE（3DES 那套）会明确报错并给出 `openssl` 转换命令。
+
 ### 实现了什么
 
 `.bin` 和 `.app` 都在 `src/sign/` 里用纯 JS 实现，不调 `hapsigntoolv2.jar`：
@@ -408,6 +499,7 @@ work/
 | `buildCms.js` | CMS SignedData 的 ASN.1 编码 |
 | `computeDigest.js` | 分片摘要（两套：`.bin` 用 4096 分片，zip 用 1 MB 分片） |
 | `parseP7b.js` | 解析 profile，取叶子证书 |
+| `parseP12.js` | 解 `.p12` 取私钥（PBES2 / PBKDF2 / AES-CBC，纯 Node 内置） |
 | `loadPrivateKey.js` | PKCS#12 或裸 PEM |
 | `loadCerts.js` | 内置的华为根 + 中间证书链 |
 | `index.js` | `prepareSigning()` 入口 |
@@ -455,6 +547,8 @@ entry-bin-debug-lite-signed.hap     6913411 B   同一个 .bin，字节完全相
 | `.bin` 签名 | 与 Gradle 产物逐段对比 | `proBlock` / `signBlock` / econtent 头完全一致 |
 | hap 签名 | `buildSignedHap` 产出的 hap 里那份 `.bin` 与 `entry-release-signed.bin` 比对 | 逐字节相同（devdemo，2.3 MB / 92 条目） |
 | `.app` 签名 | 产出的包交给 `hapsigntoolv2.jar` 跑 `verify` | Verify success |
+| `cert/` 自动发现 | 在 `_empty` 副本上放一个 p7b + 一个 p12（密码设成 `signing`）跑 `buildSignedHap` | 密码按 p12 文件名试通并回写 `signing.config.js`；多个 p7b、有 p7b 无私钥、缺 `hmlwsdk.config.js`、`sdkDir` 指错这四条都报出可操作的错误 |
+| `build.config.js` | 把 `compatibleSdkVersion` 从 3 改成 4 再构建 | `source/config.json` 的 `app.apiVersion.compatible` 跟着变，不再读 `build.gradle` |
 | 端到端 | devdemo release 的 `.bin` 对比 Gradle 的 `entry-release-unsigned.bin` | 92 个条目一条不差；其中 83 个字节相同，9 个不同（原因见[已知差异](#已知差异与局限)） |
 
 具体样本与数字：
@@ -506,17 +600,23 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 
 | 报错 | 原因 |
 |---|---|
-| `找不到 <工程>/entry/src/main/config.json，确认工程目录指对了` | 工程目录要指到**含 `entry/` 的那一级**，不是 `entry` 自己 |
+| `hmlwsdk.config.js not found in <…>` | 这个工程还没 init。在工程根跑 `hmlwsdk init` |
+| `hmlwsdk.config.js 里的 sdkDir 是 X，那里没有 hmlwsdk` | SDK 被挪走了（或者这个工程是从别的机器 clone 来的）。改 `sdkDir`，或删掉 `hmlwsdk.config.js` 重新 init |
+| `cannot find a liteWearable project above <…>` | 当前目录及其上级都没有 `entry/src/main/config.json`。cd 进工程，或显式传工程目录 |
 | `src/ace-loader 缺构建工具 …` | submodule 没拉或没装依赖。`git submodule update --init`，再 `cd src/ace-loader && npm install` |
 | `<…> 下没有 app.js，确认组件名 default 对不对` | `config.json` 的 `module.js[].name` 与 `src/main/js/` 下的目录名不一致 |
-| `找不到 <…>/build.gradle，没法确定 compileSdkVersion` | 模块目录没有 `build.gradle`，或里面少了这两个键 |
+| `compileSdkVersion found in neither <build.config.js> nor <build.gradle>` | 两处都没写版本号。init 时会从 `build.gradle` 读进 `build.config.js`，之后改那份 |
+| `found N profile files in <cert>` / `found N signing keys in <cert>` | `cert/` 里有多个候选。在 `cert/signing.config.js` 里用 `p7b` / `p12` / `keyFile` 点名要哪个 |
+| `<cert> has a profile but no signing key` | 放了 `.p7b` 却没放私钥。补一个 `.p12` 或 PKCS#8 `.pem` |
+| `<…>.p12 needs a password and none of the guesses worked` | 密码既没写在 `signing.config.js` 里，也不等于 p12 的文件名。手写进去 |
+| `cannot decrypt the bundle — the password is most likely wrong` | p12 密码不对。手写进 `signing.config.js` |
+| `unsupported PKCS#12 encryption algorithm …` | 老式 3DES 那套 PBE，本 SDK 只认 PBES2。按提示用 `openssl` 转成 `.pem` |
 | `compile js: webpack failed for component default (exit N)` | webpack 报错。异常里附了最后 2000 字符的 stdout / stderr，往前翻能看到具体哪个文件 |
 | `Json tag symbol is invalid` | 用了 `symbol` 资源。api6 的 restool 也不支持 |
 | `ParseJsonNodeByType unsupport ResType15` | 用了 `id` 资源。要走 `base/element/id_defined.json` |
-| `签名至少要给 p7b 路径（--p7b）` | 给了 `--p12` / `--key` 但没给 `--p7b` |
-| `证书链里只找到 N 张证书，至少要根+中间两张` | `--cert` 给的文件里证书不全 |
+| `证书链里只找到 N 张证书，至少要根+中间两张` | `cert/signing.config.js` 的 `certPath` 指向的文件里证书不全 |
 | 签出来了但装不上 | p7b 的叶子证书与私钥不配对。见[签名](#签名)第 1 条坑 |
-| `没有这个命令：xxx` | 命令名拼错。`hmlwsdk` 不带参数跑一次会打印四条命令 |
+| `unknown command: xxx` | 命令名拼错。`hmlwsdk` 不带参数跑一次会列全部命令 |
 
 产物不对的两种情况：
 
@@ -530,18 +630,34 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 整条链一个函数：
 
 ```js
-import { build } from "hmlwsdk";
+import { build, initProject } from "hmlwsdk";
 
 const outputs = await build({
   projectDir: "apps/devdemo/devdemo",
   target: "signedApp",          // bin | signedHap | app | signedApp
-  signingConfig: { p7b: "my.p7b", keyFile: "private-pkcs8.pem" },
   log: console.log              // 可选，每步一行进度；默认 console.log
 });
-console.log(outputs.signedApp, outputs.bin, outputs.signedBin);
+console.log(outputs.publishedApp, outputs.publishedHap, outputs.bin);
 ```
 
-不给 `signingConfig` 就出 unsigned 产物（`signedHap` / `signedApp` 两个 target 除外，它们会直接报错）。
+签名材料默认从 `<projectDir>/cert/` 自动读（`readSigningConfig`）。要绕开这套约定、直接喂材料：
+
+```js
+await build({
+  projectDir,
+  target: "signedApp",
+  signingConfig: { p7b: "my.p7b", keyFile: "private-pkcs8.pem" }
+});
+```
+
+给不出材料又不传 `signingConfig` 时，`buildBin` / `buildApp` 出 unsigned 产物，
+`signedHap` / `signedApp` 两个 target 直接报错。
+
+初始化一个工程（等价于 `hmlwsdk init`）：
+
+```js
+initProject({ dir: "/path/to/project", sdkDir: "/path/to/hmlwsdk" });
+```
 
 也可以只取单个模块用：
 
@@ -589,7 +705,10 @@ bin/hmlwsdk             macOS / Linux 的 sh 入口
 src/
   index.js              包的统一导出
   build.js              整条链 ← 查执行顺序看这里
-  readProject.js        读 build.gradle 版本号 + 源码 config.json
+  initProject.js        把工程初始化成「一条命令出包」（生成 config / cert / build / 入口脚本）
+  readProject.js        读 build.config.js（缺则回退 build.gradle）的版本号 + 源码 config.json
+  readProjectConfig.js  定位工程根 + 读 hmlwsdk.config.js（sdkDir / node）
+  readSigningConfig.js  读 cert/，自动发现 p7b / 私钥 / 密码并回写 signing.config.js
   findTools.js          定位 src/ace-loader，以及用哪个 node
 
   ── 配置 ──

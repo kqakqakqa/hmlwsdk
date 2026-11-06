@@ -8,6 +8,7 @@ import { signZip } from "./signZip.js";
 
 export { signBin, signZip };
 export { parseP7b, nowSignTime } from "./parseP7b.js";
+export { parseP12 } from "./parseP12.js";
 export { loadPrivateKey } from "./loadPrivateKey.js";
 export { slicedSha256, zipContentDigest } from "./computeDigest.js";
 export { buildSignedData, sortCertChain } from "./buildCms.js";

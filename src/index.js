@@ -25,7 +25,12 @@
 
 // 整条链
 export { build, TARGETS } from "./build.js";
-export { readProject } from "./readProject.js";
+
+// 工程与配置
+export { readProject, readSdkVersions, readGradleVersions, BUILD_CONFIG_NAME } from "./readProject.js";
+export { findProjectRoot, readProjectConfig, CONFIG_NAME } from "./readProjectConfig.js";
+export { readSigningConfig, CERT_DIR, SIGNING_CONFIG_NAME } from "./readSigningConfig.js";
+export { initProject, DEFAULT_SDK_DIR } from "./initProject.js";
 
 // 容器格式
 export {
@@ -59,4 +64,4 @@ export { runWebpack } from "./runWebpack.js";
 export { resolveTools, resolveNode } from "./findTools.js";
 
 // 签名
-export { prepareSigning, signBin, signZip, parseP7b, loadPrivateKey, slicedSha256 } from "./sign/index.js";
+export { prepareSigning, signBin, signZip, parseP7b, parseP12, loadPrivateKey, slicedSha256 } from "./sign/index.js";

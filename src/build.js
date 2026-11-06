@@ -12,6 +12,7 @@ import { packBinHap, packTreeHap } from "./packHap.js";
 import { packApp } from "./packApp.js";
 import { signApp } from "./signApp.js";
 import { prepareSigning, signBin } from "./sign/index.js";
+import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
 
 /**
  * 整条出包链
@@ -38,6 +39,15 @@ import { prepareSigning, signBin } from "./sign/index.js";
  *   work/hap/                       *.hap
  *   work/app/                       *.app + pack.info
  *
+ * 最终产物另外拷一份到 <工程>/build/ 根目录，命名用 bundleName：
+ *   build/<bundleName>.app          签名版（若 cert/ 里有签名材料）
+ *   build/<bundleName>.hap          单 .bin 形态的 hap，设备直接装它
+ * 中间产物一律留在 build/hmlwsdk/ 里（work 的默认位置），build/ 根只放能直接用的东西。
+ *
+ * 签名材料统一从 <工程>/cert/ 读（见 readSigningConfig.js），CLI 不再传 p7b/p12。
+ * 「有就签、没有就不签」对应 Gradle 的「配了 signingConfig 才签」；target 是
+ * signed* 时则要求必须有材料，缺了直接报错。
+ *
  * 中间态一律用变量传，不落盘：资源直接写进 source/assets/entry（没有 res/ 中间目录），
  * .bin 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。
  * 必须落盘的只有三类 —— webpack 的输入 manifest、webpack 的输出目录、最终产物，
@@ -48,10 +58,11 @@ export const TARGETS = ["bin", "signedHap", "app", "signedApp"];
 
 /**
  * @param {object} opts
- * @param {string} opts.projectDir    工程目录（含 entry/ 的那一层）
+ * @param {string} [opts.projectDir] 工程目录（含 entry/ 的那一层），省略用 cwd
  * @param {string} opts.target        TARGETS 里的一个
  * @param {string} [opts.work]        中间产物目录，默认 <工程>/build/hmlwsdk
- * @param {object} [opts.signingConfig] { p7b, p12?, password?, keyFile?, certPath? }
+ * @param {string} [opts.node]        跑 webpack 的 node，默认当前进程（正常从 hmlwsdk.config.js 来）
+ * @param {object} [opts.signingConfig] 显式给签名材料，省略则读 <工程>/cert/
  * @param {(line:string)=>void} [opts.log]
  * @returns {Promise<object>} 各阶段产物的路径
  */
@@ -59,15 +70,24 @@ export async function build(opts) {
   if (!TARGETS.includes(opts.target)) {
     throw new Error(`unknown target: ${opts.target} (expected one of ${TARGETS.join(", ")})`);
   }
-  if (opts.target.startsWith("signed") && !opts.signingConfig) {
-    throw new Error(`${opts.target} produces a signed artifact, but no signing config was given`);
-  }
 
   const log = opts.log ?? console.log;
   const step = makeStepTimer(log);
 
-  // ── 读工程 + 加工 config ──────────────────────────────────────────────
+  // ── 读工程 + 签名材料 ────────────────────────────────────────────────
   const project = await step("read project", () => readProject(opts.projectDir));
+
+  // 签名材料从 cert/ 读，很快（就几个文件），放在 webpack 之前 ——
+  // 这样「命令要求签名但 cert/ 是空的」立刻失败，不用等 5 秒编译完才报。
+  const signingConfig =
+    opts.signingConfig ?? (await step("read signing", () => readSigningConfig(project.root)));
+
+  if (opts.target.startsWith("signed") && !signingConfig) {
+    throw new Error(
+      `${opts.target} produces a signed artifact, but ${path.join(project.root, CERT_DIR)} has no signing material ` +
+        "(drop a .p7b plus a .p12 or PKCS#8 .pem in there; the password is tried against the p12 file name if unset)"
+    );
+  }
 
   const work = path.resolve(opts.work ?? path.join(project.root, "build", "hmlwsdk"));
   const sourceRoot = path.join(work, "source");
@@ -77,6 +97,8 @@ export async function build(opts) {
   const binDir = path.join(work, "bin");
   const hapDir = path.join(work, "hap");
   const appDir = path.join(work, "app");
+  // 最终产物另外拷一份到这里，命名用 bundleName —— 见文件末尾的 publish()
+  const outRoot = path.join(project.root, "build");
 
   // mergeProfile 之后的 config 只是中间态，不落盘 —— 真正要看的是
   // source/config.json（已回填资源 id），那份在 assembleAssets 里写。
@@ -111,6 +133,8 @@ export async function build(opts) {
       config: merged,
       work,
       sourceRoot,
+      // 用哪个 node 跑 webpack：来自 hmlwsdk.config.js，没写就是当前进程
+      node: opts.node,
       iconDir: path.join(assetsEntry, "resources")
     })
   );
@@ -137,12 +161,14 @@ export async function build(opts) {
 
   const outputs = { target: opts.target, work, bin: path.join(binDir, binName) };
 
-  // 没给签名配置时走 Gradle 的默认路径：不签，unsigned 直接当 signed 往下传
+  // cert/ 里没材料时走 Gradle 的默认路径：不签，unsigned 直接当 signed 往下传
   let binForHap = unsignedBinBuf;
   let binForHapName = binName;
-  if (opts.signingConfig) {
+  if (signingConfig) {
     binForHapName = "entry-release-signed.bin";
-    binForHap = await step("sign bin", () => signBinFile(unsignedBinBuf, path.join(binDir, binForHapName), opts.signingConfig));
+    binForHap = await step("sign bin", () =>
+      signBinFile(unsignedBinBuf, path.join(binDir, binForHapName), signingConfig)
+    );
     outputs.signedBin = path.join(binDir, binForHapName);
   }
 
@@ -169,6 +195,7 @@ export async function build(opts) {
     const signed = path.join(hapDir, "entry-bin-release-lite-signed.hap");
     fs.writeFileSync(signed, binHap);
     outputs.hap = signed;
+    outputs.publishedHap = publish(signed, outRoot, config.app.bundleName, ".hap");
     return outputs;
   }
 
@@ -187,17 +214,38 @@ export async function build(opts) {
   );
   outputs.app = appPath;
 
-  // 四条命令 = 两个停止点 × 有没有签名配置，所以 buildApp 带了 --p7b 也会往下签，
+  // 四条命令 = 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
   // 与 buildBin 的行为一致（Gradle 那边没配 signingConfig 就出 unsigned）
-  if (!opts.signingConfig) return outputs;
+  if (signingConfig) {
+    outputs.signedApp = await step("sign app", () => {
+      const buf = signApp({ appBuf, signingConfig });
+      const out = appPath.replace("-unsigned", "-signed");
+      fs.writeFileSync(out, buf);
+      return out;
+    });
+  }
 
-  outputs.signedApp = await step("sign app", () => {
-    const buf = signApp({ appBuf, signingConfig: opts.signingConfig });
-    const out = appPath.replace("-unsigned", "-signed");
-    fs.writeFileSync(out, buf);
-    return out;
-  });
+  // 拷到 build/ 根：这两份就是给人直接拿去装/发布的，中间产物留在 build/hmlwsdk/ 下
+  outputs.publishedHap = publish(outputs.binHap, outRoot, config.app.bundleName, ".hap");
+  outputs.publishedApp = publish(outputs.signedApp ?? appPath, outRoot, config.app.bundleName, ".app");
+
+  if (!signingConfig) {
+    log(`! ${CERT_DIR}/ 里没有签名材料，build/ 下的产物是未签名的，装不到表上`);
+  }
   return outputs;
+}
+
+/**
+ * 把中间产物拷到 <工程>/build/ 根，文件名用 bundleName
+ *
+ * 中间产物留在 build/hmlwsdk/ 里，保留 -unsigned / -signed / -bin- 这些区分；
+ * build/ 根只放一份能直接用的，免得用户在一堆同前缀文件里挑。
+ */
+function publish(src, outRoot, bundleName, ext) {
+  const dest = path.join(outRoot, `${bundleName}${ext}`);
+  fs.mkdirSync(outRoot, { recursive: true });
+  fs.copyFileSync(src, dest);
+  return dest;
 }
 
 /**
