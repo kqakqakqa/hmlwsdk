@@ -9,7 +9,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * 定位构建工具 —— 只用仓库自带的那份
  *
  *   src/ace-loader/            JS 构建链（git submodule，源码 2 MB + node_modules 133 MB）
- *                              里面含 bin/jerry-snapshot.exe
+ *                              原先这条链还要 bin/jerry-snapshot.exe 出 .bc，那个 exe 已经
+ *                              删了 —— 现在 .bc 由 src/jerry-parser-wasm/ 在进程内生成
  *
  * 它原本放在 vendor/ace-loader，后来挪进 src/ 了 —— 因为它已经被改造成只服务
  * liteWearable（删掉了 card/rich/路由那一半），跟上游 ace-loader 差得不少，
@@ -31,7 +32,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export function resolveTools() {
   const ace = path.resolve(HERE, "ace-loader");
 
-  const required = [path.join(ace, "webpack.lite.config.js"), path.join(ace, "bin", "jerry-snapshot.exe")];
+  // 只列真正必需的。bin/jerry-snapshot.exe 曾经在这里，但 .bc 改由
+  // src/jerry-parser-wasm/ 生成之后它就不需要了，exe 也已经删掉
+  // （要重新验证 wasm 产物可以从 HarmonyOS SDK 里拷回来，见 AGENTS.md）。
+  const required = [path.join(ace, "webpack.lite.config.js")];
 
   const missing = required.filter((p) => !fs.existsSync(p));
   if (missing.length) {
