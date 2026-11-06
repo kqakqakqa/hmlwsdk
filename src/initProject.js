@@ -3,19 +3,20 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { findProjectRoot } from "./readProjectConfig.js";
-import { readGradleVersions } from "./readProject.js";
+import { BUILD_CONFIG_NAME } from "./readProject.js";
 
 /**
- * hmlwsdk init —— 把一个 DevEco 生成的 liteWearable 工程变成「一条命令出包」的工程
+ * hmlwsdk init —— 把一个已有的 liteWearable 工程变成「一条命令出包」的工程
  *
- * 只加文件，不动原有结构：
- *   entry/ 和 entry/build.gradle 一律保留 —— 后者仍然是版本号的兜底来源，
- *   而且 DevEco 自己还要用它。
+ * 只加文件，不动原有结构：entry/ 原样保留。
+ *
+ * **前提是工程根已经有 build.config.js**（两个 SDK 版本号）。create 造出来的工程自带，
+ * 老工程得自己写一份 —— 早先 init 会去解析 entry/build.gradle 把它推导出来，
+ * 那条路已经删了。
  *
  * 生成的东西（勾 = 进版本库）：
  *
  *   hmlwsdk.config.js     ✗  hmlwsdk 在哪 + 用哪个 node（本机相关，被 .gitignore 忽略）
- *   build.config.js       ✓  compileSdkVersion / compatibleSdkVersion
  *   hmlwsdk.build.js      ✓  项目入口，npm run build 调它
  *   cert/.gitignore       ✓  忽略目录内一切（签名材料 + 含明文密码的 signing.config.js）
  *   build/.gitignore      ✓  忽略目录内一切（产物）
@@ -70,18 +71,10 @@ export function initProject(opts = {}) {
     throw new Error(`${sdkDir} does not look like hmlwsdk: ${sdkEntry} is not there`);
   }
 
-  // 版本号必须先读出来 —— 读不到就没法写 build.config.js，别先落一半文件
-  const gradleFile = path.join(root, "entry", "build.gradle");
-  const versions = readGradleVersions(gradleFile);
-  if (versions.compileSdkVersion === undefined || versions.compatibleSdkVersion === undefined) {
-    throw new Error(
-      `cannot read compileSdkVersion / compatibleSdkVersion from ${gradleFile}\n` +
-        "write both in entry/build.gradle first, or create build.config.js by hand"
-    );
-  }
+  // 前提先验，别先落一地文件才发现缺版本号
+  requireBuildConfig(root);
 
   writeIfMissing(path.join(root, "hmlwsdk.config.js"), projectConfigTemplate(sdkDir, node), { root, created, skipped });
-  writeIfMissing(path.join(root, "build.config.js"), buildConfigTemplate(versions), { root, created, skipped });
   writeIfMissing(path.join(root, "hmlwsdk.build.js"), builderTemplate(), { root, created, skipped });
   writeIfMissing(path.join(root, "cert", ".gitignore"), IGNORE_ALL, { root, created, skipped });
   writeIfMissing(path.join(root, "build", ".gitignore"), IGNORE_ALL, { root, created, skipped });
@@ -145,6 +138,9 @@ function updatePackageJson(root, { created, skipped, updated }) {
   (exists ? updated : created).push("package.json");
 }
 
+/**
+ * 写 missing 的文件，已存在就只记一笔
+ */
 function writeIfMissing(file, content, { root, created, skipped }) {
   const rel = path.relative(root, file).replace(/\\/g, "/");
   if (fs.existsSync(file)) {
@@ -154,6 +150,27 @@ function writeIfMissing(file, content, { root, created, skipped }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
   created.push(rel);
+}
+
+/**
+ * 工程根必须有 build.config.js，没有就说清楚该怎么补
+ *
+ * 不推导、不猜默认值：两个版本号决定 config.json 的 apiVersion，猜错比失败更难查。
+ * 提示里给的 6 / 3 是 api6 的常见组合，只是让人有东西可抄，不是默认值。
+ */
+function requireBuildConfig(root) {
+  const file = path.join(root, BUILD_CONFIG_NAME);
+  if (fs.existsSync(file)) return;
+
+  throw new Error(
+    `${file} is missing — it holds compileSdkVersion / compatibleSdkVersion\n\n` +
+      "write it yourself, for example:\n\n" +
+      "  export default {\n" +
+      "    compileSdkVersion: 6,\n" +
+      "    compatibleSdkVersion: 3\n" +
+      "  };\n\n" +
+      'or run "hmlwsdk create <dir>" to start from a template that already has it'
+  );
 }
 
 /** 路径写进 .js 文件里，统一正斜杠 —— 反斜杠在字符串里要转义，读起来也乱 */
@@ -176,10 +193,13 @@ export default {
 `;
 }
 
-function buildConfigTemplate({ compileSdkVersion, compatibleSdkVersion }) {
+/**
+ * build.config.js 的内容 —— 现在只有 createProject 用它（init 不再推导版本号）
+ */
+export function buildConfigTemplate({ compileSdkVersion, compatibleSdkVersion }) {
   return `/**
- * 编译用的 SDK 版本号 —— 由 hmlwsdk init 从 entry/build.gradle 读出。
- * 之后改版本改这里就行，不用再碰 gradle 文件。
+ * 编译用的 SDK 版本号。
+ * 改版本改这里就行。
  *
  *   compileSdkVersion    → config.json 的 app.apiVersion.target
  *   compatibleSdkVersion → config.json 的 app.apiVersion.compatible

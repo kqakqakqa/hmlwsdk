@@ -21,8 +21,8 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *                        └─ 编译 JS ──┘                          │          ├→ 打 hap（.bin 形态）→ 签 hap
  *                                                               └→ 打 hap（文件树）→ 打 .app → 签 .app
  *
- * 没有任务表、没有依赖图、没有跨步骤的 context 对象 —— 这些在 Gradle 里是为了
- * 声明式地拼装 100 多个 task 才需要的，这里整条链 6~10 步，顺序写出来一眼能看完。
+ * 没有任务表、没有依赖图、没有跨步骤的 context 对象 —— 整条链 6~10 步，
+ * 顺序写出来一眼能看完。
  *
  * target 决定跑到哪一步：
  *   bin        出 .bin                           （给了签名配置就顺带签）
@@ -30,7 +30,7 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *   app        出 .app                           （给了签名配置就顺带签）
  *   signedApp  出签名后的 .app
  *
- * work 目录布局（不像 Gradle 那样逐层对应 build/，只留真正用的）：
+ * work 目录布局（只留真正用的，不逐层复刻中间产物）：
  *   work/R.txt                     资源 id 表，只用来回填 config，不进包
  *   work/manifest/<组件>/           webpack 的输入
  *   work/cache/                     webpack 缓存
@@ -45,8 +45,7 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  * 中间产物一律留在 build/hmlwsdk/ 里（work 的默认位置），build/ 根只放能直接用的东西。
  *
  * 签名材料统一从 <工程>/cert/ 读（见 readSigningConfig.js），CLI 不再传 p7b/p12。
- * 「有就签、没有就不签」对应 Gradle 的「配了 signingConfig 才签」；target 是
- * signed* 时则要求必须有材料，缺了直接报错。
+ * 规则是「有就签、没有就不签」；target 是 signed* 时则要求必须有材料，缺了直接报错。
  *
  * 中间态一律用变量传，不落盘：资源直接写进 source/assets/entry（没有 res/ 中间目录），
  * .bin 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。
@@ -161,7 +160,7 @@ export async function build(opts) {
 
   const outputs = { target: opts.target, work, bin: path.join(binDir, binName) };
 
-  // cert/ 里没材料时走 Gradle 的默认路径：不签，unsigned 直接当 signed 往下传
+  // cert/ 里没材料时不签，unsigned 直接当 signed 往下传
   let binForHap = unsignedBinBuf;
   let binForHapName = binName;
   if (signingConfig) {
@@ -190,8 +189,8 @@ export async function build(opts) {
   outputs.binHap = path.join(hapDir, "entry-bin-release-lite-unsigned.hap");
 
   if (opts.target === "signedHap") {
-    // 与 Gradle 的差别：不往 hap 的 zip 里插 "HAP Sig Block 42"。设备验的是
-    // .bin 自己的签名块，那层块没有验证价值。所以这里只是换个名字存一份。
+    // 不往 hap 的 zip 里插 "HAP Sig Block 42" —— 设备验的是 .bin 自己的签名块，
+    // 那层块没有验证价值。所以这里只是换个名字存一份。
     const signed = path.join(hapDir, "entry-bin-release-lite-signed.hap");
     fs.writeFileSync(signed, binHap);
     outputs.hap = signed;
@@ -214,8 +213,8 @@ export async function build(opts) {
   );
   outputs.app = appPath;
 
-  // 四条命令 = 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
-  // 与 buildBin 的行为一致（Gradle 那边没配 signingConfig 就出 unsigned）
+  // 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
+  // 与 buildBin 的行为一致
   if (signingConfig) {
     outputs.signedApp = await step("sign app", () => {
       const buf = signApp({ appBuf, signingConfig });

@@ -24,7 +24,7 @@ import { generateJsSnapshot } from "./generateJsSnapshot.js";
  *   projectPath = env.aceModuleRoot || ... || process.cwd()
  * 然后 main.product.js 的 loadEntryObj 里检查 path.resolve(projectPath, 'app.js')
  * 存不存在，不存在就报 ERROR: missing app.js。
- * 所以 Gradle 是「每个组件单独编一次」，传 src/main 会直接报 missing app.js。
+ * 所以每个组件要「单独编一次」，传 src/main 会直接报 missing app.js。
  *
  * release 与 debug 的差别：webpack 换 mode production，代码被压缩
  * 实测（devdemo 两变体对比）：app.js 6187 → 1604，app.bc 2564 → 1812。

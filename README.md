@@ -3,10 +3,12 @@
 纯 JavaScript 实现的 HarmonyOS **liteWearable（轻智能手表）**应用打包链。输入一个标准 DevEco 工程目录，输出 `.bin`、hap 和 `.app`。
 
 ```bash
-cd /path/to/your/project
-hmlwsdk init                 # 一次性：生成 hmlwsdk.config.js / build.config.js / cert/ / hmlwsdk.build.js
-hmlwsdk buildSignedApp       # 之后随时跑，签名材料从 cert/ 读，产物落在 build/
+hmlwsdk create myapp         # 从内置模板造一个空工程（不需要 DevEco、不需要 gradle）
+cd myapp
+hmlwsdk buildSignedApp       # 签名材料丢进 cert/ 之后，一条命令出包
 ```
+
+已有 DevEco 工程的话跳过 `create`，先写一份 `build.config.js`（两个 SDK 版本号），再在工程根跑一次 `hmlwsdk init`（生成 `hmlwsdk.config.js` / `cert/` / `hmlwsdk.build.js`），之后一样随时 `buildSignedApp`。
 
 运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不依赖 native 二进制。
 
@@ -134,7 +136,11 @@ PNG 压缩用 Node 内置的 `node:zlib`，不额外引包。压缩参数按 lib
 ## 快速开始
 
 ```bash
-# 一次性初始化：在工程根跑（就是含 entry/ 的那一层）
+# ① 没有工程？造一个。目录省略时就在当前目录造（除 .git 这类点开头的条目外必须为空）
+hmlwsdk create myapp
+cd myapp
+
+# ② 已经有 DevEco 工程？在工程根（含 entry/ 的那一层）跑一次 init
 hmlwsdk init
 
 # 之后在工程里任何目录下都能直接跑 —— 工程根靠 entry/src/main/config.json 向上找
@@ -144,11 +150,31 @@ hmlwsdk buildSignedHap   # 出「里面那个 .bin 已签名」的 hap（要求 
 hmlwsdk buildSignedApp   # 出签名的 .app（要求 cert/ 有材料）
 ```
 
-init 之后工程里多出这些东西，**都不用传参数了**：
+`create` 的产物是 `apps/_empty/_empty` 那个最小 DevEco 工程**只留运行期源码**的样子：
+
+```
+myapp/
+  entry/src/main/
+    config.json           ← bundleName 是 com.example.app，装表前自己改掉
+    js/default/           ← app.js + pages/index/{index.hml,index.css,index.js}
+    resources/base/
+      element/string.json ← appName 自动填成目录名（手表上显示的就是它）
+      media/icon.png + icon_small.png
+  build.config.js         ← compileSdkVersion 6 / compatibleSdkVersion 3
+  hmlwsdk.config.js       ← 本机 SDK 路径（不进版本库）
+  hmlwsdk.build.js + package.json + .gitignore
+  cert/  build/           ← 各带一个忽略一切的 .gitignore
+```
+
+没有 `build.gradle`、`settings.gradle`、`gradlew`、`local.properties`、`.idea/` ——
+本 SDK 出包一个都不读，版本号在 `build.config.js` 里。唯一的硬约束是 `bundleName`：
+模板固定写 `com.example.app`，多个工程同时装表会互相顶掉，装之前改成自己的。
+`create` 完之后可以直接 `hmlwsdk buildBin`（实测 3.3 s 出 `.bin`）。
+
+`init` 那一步在工程里多出这些东西，**都不用传参数**：
 
 ```
 hmlwsdk.config.js     ← 不进版本库：本机 hmlwsdk 的路径 + 用哪个 node
-build.config.js       ← 进版本库：compileSdkVersion / compatibleSdkVersion
 hmlwsdk.build.js      ← 进版本库：npm run build 的入口
 cert/                 ← 进版本库的只有 .gitignore，签名材料丢在这里
   .gitignore
@@ -161,7 +187,11 @@ build/                ← 产物，只有 .gitignore 进版本库
   hmlwsdk/            ← 中间产物
 ```
 
-`init` 只加文件，不动 `entry/`、`build.gradle`、`gradlew` —— DevEco 那边照旧能用。
+`build.config.js` 不在这里 —— 它是**前提**，不是 init 生成的。`create` 造出来的工程自带，
+老工程得自己写一份（`export default { compileSdkVersion: 6, compatibleSdkVersion: 3 }`）。
+缺了 init 直接报错并给出可抄的内容，不会猜默认值。
+
+`init` 只加文件，不动 `entry/` —— DevEco 那边照旧能用。
 重复跑是幂等的：已有文件只跳过不覆盖。
 
 `build/.gitignore` 与 `cert/.gitignore` 内容一样（`*` + `!.gitignore`）。注意 DevEco 生成的
@@ -189,14 +219,16 @@ npm run build:app
 hmlwsdk <命令> [工程目录]
 ```
 
-工程目录可以省略 —— 省略时从当前目录向上找含 `entry/src/main/config.json` 的那一层。
+`init` / `build*` 的工程目录可以省略 —— 省略时从当前目录向上找含 `entry/src/main/config.json` 的那一层。
+`create` 的目录参数是**字面目标路径**（在那里新建，所以不能要求它已经存在），省略时用当前目录。
 **没有任何签名相关参数**：签名材料统一从 `<工程>/cert/` 读。
 
-四条命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名材料。
+`create` / `init` 各一条，加上四条 build 命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名材料。
 
 | 命令 | 做什么 | 产出（相对 work） |
 |---|---|---|
-| `init` | 把工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
+| `create` | 从内置模板造一个新工程（模板 = 最小工程源码，不含任何构建脚本） | `entry/src/main/**`、`build.config.js`、`hmlwsdk.config.js`、`hmlwsdk.build.js`、`package.json`、`.gitignore`、`cert/`、`build/` |
+| `init` | 把已有工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
 | `buildBin` | 只构建 `.bin` | `bin/entry-release-unsigned.bin` |
 | `buildApp` | 构建到 `.app`，顺带把两种 hap 和 `.bin` 都出了 | `app/<工程名>-release-unsigned.app` + `pack.info`<br>`hap/entry-bin-release-lite-unsigned.hap`<br>`hap/entry-release-lite-unsigned.hap`<br>`bin/entry-release-unsigned.bin` |
 | `buildSignedHap` | 构建 + 签名，出可以装表的 hap | `hap/entry-bin-release-lite-signed.hap` |
@@ -225,7 +257,7 @@ buildSignedApp → signedApp
 
 | 步骤 | 做什么 | 产出（相对 work） |
 |---|---|---|
-| `read project` | 读 build.config.js（缺则回退 build.gradle）的版本号 + 源码 config.json | 无 |
+| `read project` | 读 build.config.js 的版本号 + 源码 config.json | 无 |
 | `read signing` | 读 `cert/`，自动发现 p7b / 私钥 / 密码 | 无（回写 `cert/signing.config.js`） |
 | `merge config` | 注入 apiVersion、abilities 默认值 | 无（传对象，不落盘） |
 | `compile resources` | 编译资源（JS 实现，原 restool 的活） | `source/assets/entry/resources.index` + `resources/`<br>`R.txt` |
@@ -266,7 +298,7 @@ hmlwsdk buildApp
 ```
 <工程目录>/
   entry/
-    build.gradle              ← 必须有 compileSdkVersion / compatibleSdkVersion
+    build.gradle              ← 不需要，本 SDK 不读
     src/main/
       config.json             ← 必须有
       resources/              ← 资源根
@@ -285,28 +317,21 @@ hmlwsdk buildApp
 
 CLI 启动时会从当前目录向上找 `entry/src/main/config.json`，找不到直接报错退出。
 
-### 版本号：build.config.js 或 build.gradle
+### 版本号：build.config.js
 
 两个 SDK 版本号决定 `config.json` 里的 `app.apiVersion.target` / `.compatible`：
 
 ```js
-// <工程目录>/build.config.js —— init 生成，优先读这个
+// <工程目录>/build.config.js —— create 直接写好，其余工程自己写
 export default {
   compileSdkVersion: 6,
   compatibleSdkVersion: 3
 };
 ```
 
-没有 `build.config.js` 时回退读模块的 `entry/build.gradle`：
-
-```
-compileSdkVersion 6
-compatibleSdkVersion 3
-```
-
-`key value` 和 `key = value` 两种写法都认。字段可以只写一个 —— 缺的那个回退另一处。
-
-**两处都读不到就报错，不猜默认值** —— 静默用错版本比直接失败更难查（早先这两个值写死成 6 / 3，换个工程 `apiVersion` 就是错的）。
+**这是唯一来源。** 早先缺字段时会回退去解析模块的 `entry/build.gradle`，那条路已经删了 ——
+工程带不带构建脚本对本 SDK 没有意义。文件或字段缺失就报错，不猜默认值
+（静默用错版本比直接失败更难查）。
 
 ### config.json
 
@@ -420,9 +445,9 @@ work/
 
 | 步骤 | 关键点 |
 |---|---|
-| `read project` | 版本号先从 `build.config.js` 读，缺的字段回退模块的 `build.gradle`，两处都没有直接报错，不猜默认值 |
+| `read project` | 版本号只从 `build.config.js` 读，缺文件或字段直接报错，不猜默认值 |
 | `read signing` | 读 `<工程>/cert/`：先看 `signing.config.js`，缺的字段扫目录取唯一的 `.p7b` / `.p12` / `.pem` 并回写。密码没写就拿 p12 文件名试。细节见[签名](#签名) |
-| `merge config` | 按 `build.gradle` 填 `app.apiVersion`、release **不写** `deviceConfig.default.debug`、`abilities` 里缺 `homeAbility` 的补 `false`。Gradle 的 `processProfile` 那一步实测只调键顺序，已合并到这里 |
+| `merge config` | 按 `build.config.js` 的版本号填 `app.apiVersion`、release **不写** `deviceConfig.default.debug`、`abilities` 里缺 `homeAbility` 的补 `false`。`processProfile` 那一步实测只调键顺序，已合并到这里 |
 | `compile resources` | 直接编进 `source/assets/entry`。扫 `resources/` → 发 id → 写 `resources.index` / `R.txt` / 复制文件 / 压缩 PNG |
 | `compile js` | `aceModuleRoot` 必须是**组件目录**（`src/main/js/<组件>`），传 `src/main` 会直接报 `missing app.js`。产物目录必须带 `assets/js/<组件名>` 这一层，否则 webpack 把 `app.js` 写在根下，与 Gradle 结构差 83 个条目。每个组件自己拼一份 manifest，不落成独立的中间产物 |
 | `assemble assets` | 回填 `iconId` / `labelId`、`deviceType` 只写回 `liteWearable`、删双后缀 `.png.bin`。不搬文件 —— 资源编译和 webpack 都已经写在最终位置了 |
@@ -548,7 +573,7 @@ entry-bin-debug-lite-signed.hap     6913411 B   同一个 .bin，字节完全相
 | hap 签名 | `buildSignedHap` 产出的 hap 里那份 `.bin` 与 `entry-release-signed.bin` 比对 | 逐字节相同（devdemo，2.3 MB / 92 条目） |
 | `.app` 签名 | 产出的包交给 `hapsigntoolv2.jar` 跑 `verify` | Verify success |
 | `cert/` 自动发现 | 在 `_empty` 副本上放一个 p7b + 一个 p12（密码设成 `signing`）跑 `buildSignedHap` | 密码按 p12 文件名试通并回写 `signing.config.js`；多个 p7b、有 p7b 无私钥、缺 `hmlwsdk.config.js`、`sdkDir` 指错这四条都报出可操作的错误 |
-| `build.config.js` | 把 `compatibleSdkVersion` 从 3 改成 4 再构建 | `source/config.json` 的 `app.apiVersion.compatible` 跟着变，不再读 `build.gradle` |
+| `build.config.js` | 把 `compatibleSdkVersion` 从 3 改成 4 再构建 | `source/config.json` 的 `app.apiVersion.compatible` 跟着变 |
 | 端到端 | devdemo release 的 `.bin` 对比 Gradle 的 `entry-release-unsigned.bin` | 92 个条目一条不差；其中 83 个字节相同，9 个不同（原因见[已知差异](#已知差异与局限)） |
 
 具体样本与数字：
@@ -600,12 +625,13 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 
 | 报错 | 原因 |
 |---|---|
+| `<…> is not empty: a, b, c` | `create` 只往空目录里建。换个目录，或先清空（`.git` / `.gitignore` 这类点开头的条目不算） |
 | `hmlwsdk.config.js not found in <…>` | 这个工程还没 init。在工程根跑 `hmlwsdk init` |
 | `hmlwsdk.config.js 里的 sdkDir 是 X，那里没有 hmlwsdk` | SDK 被挪走了（或者这个工程是从别的机器 clone 来的）。改 `sdkDir`，或删掉 `hmlwsdk.config.js` 重新 init |
 | `cannot find a liteWearable project above <…>` | 当前目录及其上级都没有 `entry/src/main/config.json`。cd 进工程，或显式传工程目录 |
 | `src/ace-loader 缺构建工具 …` | submodule 没拉或没装依赖。`git submodule update --init`，再 `cd src/ace-loader && npm install` |
 | `<…> 下没有 app.js，确认组件名 default 对不对` | `config.json` 的 `module.js[].name` 与 `src/main/js/` 下的目录名不一致 |
-| `compileSdkVersion found in neither <build.config.js> nor <build.gradle>` | 两处都没写版本号。init 时会从 `build.gradle` 读进 `build.config.js`，之后改那份 |
+| `<…>/build.config.js is missing` | 工程根没有 `build.config.js`。`create` 造出来的自带；老工程自己写一份（`export default { compileSdkVersion: 6, compatibleSdkVersion: 3 }`） |
 | `found N profile files in <cert>` / `found N signing keys in <cert>` | `cert/` 里有多个候选。在 `cert/signing.config.js` 里用 `p7b` / `p12` / `keyFile` 点名要哪个 |
 | `<cert> has a profile but no signing key` | 放了 `.p7b` 却没放私钥。补一个 `.p12` 或 PKCS#8 `.pem` |
 | `<…>.p12 needs a password and none of the guesses worked` | 密码既没写在 `signing.config.js` 里，也不等于 p12 的文件名。手写进去 |
@@ -659,6 +685,14 @@ await build({
 initProject({ dir: "/path/to/project", sdkDir: "/path/to/hmlwsdk" });
 ```
 
+从模板造一个新工程（等价于 `hmlwsdk create`，会顺带调一次 `initProject`）：
+
+```js
+import { createProject } from "hmlwsdk";
+
+const { root, copied } = createProject({ dir: "/path/to/myapp", sdkDir: "/path/to/hmlwsdk" });
+```
+
 也可以只取单个模块用：
 
 ```js
@@ -679,7 +713,7 @@ import {
 | 函数 | 用途 |
 |---|---|
 | `build({projectDir, target, ...})` | 整条链，返回各产物路径 |
-| `readProject(projectDir)` | 读 build.gradle 版本号 + 源码 config.json |
+| `readProject(projectDir)` | 读 build.config.js 版本号 + 源码 config.json |
 | `readBin(buf)` / `writeBin({bundleName, entries})` | `.bin` 私有容器读写 |
 | `stripSignature(buf)` / `isSignedBin(buf)` | 剥签名块 / 判断是否已签 |
 | `collectFiles(dir)` | 递归扫目录成条目列表（按路径深度 + 字节序） |
@@ -702,11 +736,14 @@ import {
 bin/hmlwsdk.js          CLI 实现，package.json 的 bin 字段指向它
 bin/hmlwsdk.cmd         Windows 的 cmd / PowerShell 入口（Windows 不认 shebang）
 bin/hmlwsdk             macOS / Linux 的 sh 入口
+templates/
+  liteWearableEmpty/    新工程的模板 = 最小工程源码（不含构建脚本，共 9 个文件）
 src/
   index.js              包的统一导出
   build.js              整条链 ← 查执行顺序看这里
+  createProject.js      从模板造新工程（复制 → 改 appName → 交给 initProject）
   initProject.js        把工程初始化成「一条命令出包」（生成 config / cert / build / 入口脚本）
-  readProject.js        读 build.config.js（缺则回退 build.gradle）的版本号 + 源码 config.json
+  readProject.js        读 build.config.js 的版本号 + 源码 config.json
   readProjectConfig.js  定位工程根 + 读 hmlwsdk.config.js（sdkDir / node）
   readSigningConfig.js  读 cert/，自动发现 p7b / 私钥 / 密码并回写 signing.config.js
   findTools.js          定位 src/ace-loader，以及用哪个 node
@@ -745,7 +782,7 @@ src/
 
 ### 三条命名规矩
 
-- **全部平铺在 `src/` 下，不建目录**。只有三个例外：`sign/`、`ace-loader/`（submodule，本来就是一整棵目录）、`jerry-parser-wasm/`（wasm 产物 + 60 行封装）。
+- **全部平铺在 `src/` 下，不建目录**。只有三个例外：`sign/`、`ace-loader/`（submodule，本来就是一整棵目录）、`jerry-parser-wasm/`（wasm 产物 + 60 行封装）。`templates/` 在 `src/` 外面（跟 `bin/` `doc/` 平级）—— 模板是数据不是代码，摆在源码目录里反而碍事。
 - **文件名一律「动词 + 名词」**，不许用缩写、不许加角色后缀，也不带变体词（`debug` 不做，`release` 是唯一变体，写进名字只是噪音）。`processConfig.js` 是「加工配置」、`collectFiles.js` 是「收集文件」、`build.js` 是「构建」。这条是踩过三次坑换来的（`ctx.js`、`rtable.js` 这种只有写的人懂的缩写，后来又变成 `-Transform` / `-Runner` / `-file` 三套后缀混用）。
 - **`bin/` 和 `src/readWriteBin.js` 不是一回事**。`bin/` 是可执行入口目录（npm 惯例），`readWriteBin.js` 管 `.bin` 私有容器。
 

@@ -18,7 +18,7 @@ import { copyResourceFiles } from "./copyResourceFiles.js";
  *   resources/rawfile/…                  rawfile 整棵复制
  *
  * 不产出 config.json。早先这里会写一份「回填过资源 id」的 config，理由是
- * 「让 res 目录结构和 Gradle 对上」—— 但那份文件没有任何读者（真正打进包的那份
+ * 「让 res 目录结构跟构建产物对上」—— 但那份文件没有任何读者（真正打进包的那份
  * 由 assembleAssets 从 R.txt 重新回填后写到 source/config.json），已经删掉。
  *
  * 不产出 ResourceTable.java —— 那是给 Java 编译链用的，liteWearable 走 JS，

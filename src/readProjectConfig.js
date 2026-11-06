@@ -61,7 +61,7 @@ export async function readProjectConfig(projectDir) {
     throw new Error(
       `${CONFIG_NAME} not found in ${root}\n` +
         `run "hmlwsdk init" in that directory first — it writes ${CONFIG_NAME} with the ` +
-        `path of this SDK, plus build.config.js and hmlwsdk.build.js`
+        `path of this SDK, plus hmlwsdk.build.js and the cert/ and build/ directories`
     );
   }
 

@@ -78,7 +78,7 @@ function buildPackInfo(config, moduleName) {
         {
           deviceType: m.deviceType ?? ["liteWearable"],
           abilities: (m.abilities ?? []).map((ab) => ({ name: ab.name, label: ab.label })),
-          // 重新构造，不能直接引用 config 里的对象 —— 键序必须和 Gradle 一致：
+          // 重新构造，不能直接引用 config 里的对象 —— 键序是固定的：
           //   distro     moduleType → deliveryWithInstall → moduleName
           //   apiVersion compatible → releaseType → target
           distro: {

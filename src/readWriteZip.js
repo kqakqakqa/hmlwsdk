@@ -6,7 +6,7 @@ import zlib from "zlib";
  * 为什么不用 jszip：hap 和 .app 的签名块要插在「数据区」和「中央目录」之间，
  * 摘要按 1 MB 分片算（见 sign/digest.js 的 zipContentDigest）。这套算法要求
  * 签名前后字节布局完全可控。jszip 输出时会自己决定 extra field、时间戳、
- * 压缩策略、条目顺序，任何一项跟 Gradle 不一致，摘要就对不上、设备验签不过。
+ * 压缩策略、条目顺序，任何一项变了，摘要就对不上、设备验签不过。
  *
  * 所以这里只实现 hap/.app 用到的那一小部分：
  *   - 读：按 central directory 遍历，stored(method 0) 和 deflate(method 8) 两种

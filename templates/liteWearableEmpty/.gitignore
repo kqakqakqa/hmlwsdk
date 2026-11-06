@@ -1,0 +1,7 @@
+# 本机配置（hmlwsdk 的绝对路径 + 用哪个 node），换机器重新 init 即可
+/hmlwsdk.config.js
+
+/node_modules
+.DS_Store
+
+# build/ 和 cert/ 各带一个 .gitignore（忽略目录内一切），不用在这里列

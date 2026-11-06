@@ -1,8 +1,8 @@
 /**
  * config.json 加工
  *
- * Gradle 把这件事拆成两个 task：mergeProfile 注入版本信息、processProfile 再加工一遍。
- * 但 processProfile 实测只调整了键顺序、内容一个字都没变（api6 的 1.022 上），
+ * 这件事原本拆成两步：注入版本信息、再加工一遍。
+ * 但第二步实测只调整了键顺序、内容一个字都没变（api6 的 1.022 上），
  * 所以本 SDK 只做一遍。
  *
  * 唯一还剩的第二个阶段是「回填资源 id」（parseResourceTable.js 的 fillResourceIds），
@@ -24,8 +24,8 @@
  *
  * @param {object} source 源码里的 config.json
  * @param {object} opts
- * @param {number} opts.compileSdkVersion   来自 build.gradle 的 compileSdkVersion
- * @param {number} opts.compatibleSdkVersion 来自 defaultConfig.compatibleSdkVersion
+ * @param {number} opts.compileSdkVersion   来自 build.config.js 的 compileSdkVersion
+ * @param {number} opts.compatibleSdkVersion 来自 build.config.js 的 compatibleSdkVersion
  * @param {string} [opts.releaseType]       默认 "Release"
  * @returns {object} 新的 config 对象（不改原对象）
  */
@@ -49,7 +49,7 @@ export function mergeProfile(source, opts) {
 }
 
 /**
- * 序列化。必须和 Gradle 的 Java 序列化器一致，否则产物差 98 B。
+ * 序列化。格式必须逐字节固定，不一致产物就差 98 B。
  *
  * 实测两个格式差异（devdemo release 的 config.json，Gradle 3422 B vs 我们 3324 B）：
  *

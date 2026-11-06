@@ -27,10 +27,11 @@
 export { build, TARGETS } from "./build.js";
 
 // 工程与配置
-export { readProject, readSdkVersions, readGradleVersions, BUILD_CONFIG_NAME } from "./readProject.js";
+export { readProject, readSdkVersions, BUILD_CONFIG_NAME } from "./readProject.js";
 export { findProjectRoot, readProjectConfig, CONFIG_NAME } from "./readProjectConfig.js";
 export { readSigningConfig, CERT_DIR, SIGNING_CONFIG_NAME } from "./readSigningConfig.js";
 export { initProject, DEFAULT_SDK_DIR } from "./initProject.js";
+export { createProject, TEMPLATE_DIR, TEMPLATE_NAME } from "./createProject.js";
 
 // 容器格式
 export {

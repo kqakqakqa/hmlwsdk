@@ -22,7 +22,7 @@ import { parseRTable, fillResourceIds } from "./parseResourceTable.js";
  *   source/assets/js/default/app.js / app.bc / manifest.json
  *   source/assets/js/default/common/*.bin + *.png
  *
- * 注意 .png 和 .bin 并存 —— Gradle 复制 assets 时只排除 .txt 后缀，没排除 .png。
+ * 注意 .png 和 .bin 并存 —— 复制 assets 时只排除 .txt 后缀，没排除 .png。
  * 而 .bin 那批不是资源编译的产物，是 ace-loader 的 ImageCoverterPlugin
  * 在 webpack 阶段顺手做的（webpack.lite.config.js 第 185 行）。
  */

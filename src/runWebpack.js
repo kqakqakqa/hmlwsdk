@@ -19,7 +19,7 @@ import { resolveTools, resolveNode } from "./findTools.js";
  *   依据 webpack.lite.config.js 第 119 行：
  *     projectPath = env.aceModuleRoot || process.env.aceModuleRoot || cwd
  *   而 main.product.js 的 loadEntryObj 会检查 <projectPath>/app.js 是否存在，
- *   不存在就报 "ERROR: missing app.js"。所以 Gradle 是每个组件各调一次 webpack。
+ *   不存在就报 "ERROR: missing app.js"。所以每个组件要各调一次 webpack。
  *
  * 实测耗时：首次 59 s（webpack cache 为空），第二次 1.76 s。
  * devdemo（24 个页面）release 一次约 20 s。
@@ -56,7 +56,7 @@ export function runWebpack(opts) {
     cachePath: opts.cacheDir ?? path.join(path.dirname(opts.buildDir), "cache"),
     // iconPath：lite-image-coverter-plugin.js 里
     //   "" !== iconPath && getDir(iconPath).forEach(img2bin)
-    // 设了它才会把该目录下的 png 也转成 .bin。Gradle 用它把 restool 输出目录里的
+    // 设了它才会把该目录下的 png 也转成 .bin。用它把资源目录里的
     // icon.png 转成 assets/entry/resources/base/media/icon.bin。
     // 注意 img2bin 会同时写 xxx.bin 和 xxx.png.bin 两份，后者要过滤掉。
     ...(opts.iconPath ? { iconPath: opts.iconPath } : {})
