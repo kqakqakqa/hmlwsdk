@@ -8,8 +8,9 @@
  *   bin 读写          4 个真实 .bin 解析后重建，比对 SHA256            字节级一致
  *   zip 读写          hap 打包后与 Gradle 产物对比                    条目内容一致
  *   config 加工       源码 → merge → process → 回填资源号            三阶段内容一致
- *   资源编译          纯 JS 重写，对比 restool 1.022 的产物            index / R.txt /
- *                                                                    png 全部字节一致
+ *   资源编译          纯 JS 重写，对比 restool 1.022 的产物            index / R.txt 字节一致；
+ *                                                                    png 像素一致（压缩改用
+ *                                                                    node:zlib，字节差几 B）
  *   JS 编译           node + ace-loader 独立跑通                      COMPILE RESULT:SUCCESS
  *   .bin 签名         与 gradle 产物逐段对比                          proBlock/signBlock/
  *                                                                    econtent 头完全一致

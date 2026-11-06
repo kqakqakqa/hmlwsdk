@@ -1,35 +1,39 @@
-// pako 1.0.11 是 CJS 包，具名导出在 ESM 下探测不全（constants 拿不到），走默认导出
-import pako from "pako";
+import zlib from "node:zlib";
 
 import { crc32 } from "./readWriteZip.js";
 
 /**
- * PNG 重编码 —— 复现 restool.exe 1.022 加 -z 时的图片"压缩"
+ * PNG 重编码 —— 对应 restool.exe 1.022 加 -z 时的图片"压缩"
  *
  * 为什么需要这个模块：restool -z 不是无损拷贝，它会把 png 整个重写一遍。
  * 实测 apps/_empty 的 icon.png 6790 B → 6320 B，尺寸和像素都没变，少掉的 331 B
  * 是一个 iTXt chunk（里面装 Adobe XMP 元数据）。
  *
- * 实测还原出来的算法（拿 exe 的产物逐字节比对确认）：
+ * 还原出来的算法（拿 exe 的产物逐字节比对确认的）：
  *   1. 只留 IHDR / IDAT / IEND，其余 ancillary chunk 全丢
  *   2. 解压 IDAT 拿到扫描线，按每行的原 filter 反滤波得到裸像素
  *   3. 用 libpng 的启发式重新挑每行的 filter
  *   4. zlib level 9 / memLevel 8 / strategy Z_FILTERED 重压，按 8192 B 切 IDAT
  *
- * 三个卡点，都是实测踩出来的：
+ * 压缩用 Node 内置的 node:zlib，不追求与 restool 的字节一致。
+ * 当初引入 pako 1.0.11 只是为了逐字节对齐 restool（底下是 zlib 1.2.11），
+ * 现在按「压缩结果正确、像素不变」验收，字节差几 B 无所谓 —— PNG 是无损的，
+ * 解压后像素相同，设备读的也是像素。代价是产物字节跟着 Node 内置 zlib 走：
+ * Node 26 的 zlib-ng 同参数压出来的 zlib 数据是 6261 B，restool 是 6263 B。
  *
- *   - **不能用 node:zlib**。Node 26 内置的是 zlib-ng，同样的参数压出来是 6261 B，
- *     比 restool 的 6263 B 少 2 字节。必须用 pako（zlib 1.2.x 的 JS 移植）才对得上。
+ * 两个卡点仍然保留，它们决定"压得对不对、够不够小"，与字节一致无关：
+ *
  *   - **滤波要按 libpng 的规则挑**。逐行试 NONE/SUB/UP/AVG/PAETH，把结果字节当
  *     signed char 取绝对值求和，取代价最小的；平局保留先试的那个（libpng 用严格
- *     小于才替换）。顺序就是 NONE → SUB → UP → AVG → PAETH。
+ *     小于才替换）。顺序就是 NONE → SUB → UP → AVG → PAETH。用无符号和挑出来的
+ *     行压制效果会变差。
  *   - **IDAT 按 8192 字节硬切**。实测 atri-mdm 的 icon.png 压出来 28619 B，切成
  *     IDAT:8192 8192 8192 3950 四块。libpng 的 zbuffer 就是 8192。
  *
- * 验证结果（都是 SHA256/字节级）：
- *   _empty/icon.png       6790 → 6320 B  完全一致
- *   _empty/icon_small.png 5898 → 5448 B  完全一致
- *   atri-mdm/icon.png    28619 → 28619 B 完全一致（这张本来就没有多余 chunk）
+ * 验证结果（与源图逐像素比对，Node 26 实测）：
+ *   _empty/icon.png       6790 → 6318 B  像素一致（restool 是 6320 B）
+ *   _empty/icon_small.png 5898 → 5449 B  像素一致（restool 是 5448 B）
+ *   atri-mdm/icon.png    28619 → 28619 B 像素一致（restool 也是 28619 B，这张本来就压到极限）
  *
  * 只处理 8 bit、非隔行、非调色板的 PNG。别的形态（16 bit、隔行、调色板）返回 null，
  * 由调用方原样拷贝 —— 这几类 restool 1.022 认不认没验证过，不猜。
@@ -63,13 +67,13 @@ export function compressPng(input) {
   const stride = width * bpp;
 
   const idat = Buffer.concat(readChunks(input).filter((c) => c.type === "IDAT").map((c) => c.data));
-  const pixels = unfilter(pako.inflate(idat), stride, height, bpp);
+  const pixels = unfilter(zlib.inflateSync(idat), stride, height, bpp);
   if (!pixels) return null;
 
-  const recompressed = pako.deflate(refilter(pixels, stride, height, bpp), {
+  const recompressed = zlib.deflateSync(refilter(pixels, stride, height, bpp), {
     level: 9,
     memLevel: 8,
-    strategy: pako.Z_FILTERED // pako 1.0.11 把 zlib 常量平铺在顶层，没有 constants 子对象
+    strategy: zlib.constants.Z_FILTERED
   });
 
   const parts = [SIGNATURE, writeChunk("IHDR", ihdrData)];

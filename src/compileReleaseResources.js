@@ -18,6 +18,10 @@ import { todo } from "./createTaskContext.js";
  *   openCrab        仅版本串 1 字节     一致     47 个文件全一致
  *   腕上词典        仅版本串 1 字节     一致     7 个文件全一致
  *
+ * 上表是图片压缩还依赖 pako 时的记录。现在压缩改用 Node 内置 zlib（见 compressPng.js），
+ * resources/ 下的 png 不再与 restool 的产物字节一致 —— PNG 是无损的，解压后像素相同，
+ * 差的只是压缩字节（devdemo 的 icon.png 3621 → 3593 B）。除此之外其余文件仍逐字节一致。
+ *
  * 两处已知差异，都不是功能问题：
  *   1. openCrab / 腕上词典的 Gradle 产物是 api7 的 restool 1.028 生成的，index 头部
  *      版本串写的是 "Restool 1.028"，我们统一写 1.022，所以只差第 12 个字节。
@@ -43,7 +47,8 @@ export function run(taskContext) {
     moduleName: "entry",
     outDir,
     // 压缩图片（原来是 restool 的 -z）。不开的话 png 是源码原样大小
-    // （_empty 的 icon.png 6790 B），开了才是 Gradle 产物那样 6320 B。
+    // （_empty 的 icon.png 6790 B），开了是 6318 B —— restool 的产物是 6320 B，
+    // 差 2 B 属正常，压缩走 node:zlib 而不是 restool 用的 zlib 1.2.11。
     compressImage: true,
     force: true
   });
