@@ -9,11 +9,21 @@ import { parseBuildGradle } from "../src/parseBuildGradle.js";
 /**
  * hmlwsdk 命令行入口
  *
- *   node bin/hmlwsdk.js signReleaseApp <工程目录>
- *   node bin/hmlwsdk.js packageReleaseApp <工程目录> --work <中间产物目录>
- *   node bin/hmlwsdk.js --plan signReleaseApp        只列要跑哪些任务，不执行
+ *   hmlwsdk buildBin <工程目录>
+ *   hmlwsdk buildSignedHap <工程目录> --p7b my.p7b --key private-pkcs8.pem
+ *   hmlwsdk --plan buildSignedHap     只列要跑哪些任务，不执行
  *
- * 签名相关参数（不给就跳过签名，出 unsigned 包）：
+ * 四条命令：
+ *
+ *   buildBin          只出 .bin
+ *   buildApp          出 .app（顺带把 hap、.bin 都出了，它在依赖链末端）
+ *   buildSignedHap    构建 + 签名，出「里面那个 .bin 已签名」的 hap
+ *   buildSignedApp    构建 + 签名，出签名的 .app
+ *
+ * 没有单独的签名命令，也没有 buildHap —— 未签名的 hap 是 buildSignedHap 的中间产物
+ * （hap/release/entry-bin-release-lite-unsigned.hap），照样留在 work 目录里。
+ *
+ * 签名相关参数（buildBin / buildApp 不给就是出 unsigned 包；buildSigned* 必须给）：
  *   --p7b <file>      必给，HarmonyOS profile
  *   --p12 <file>      PKCS#12 私钥库，配合 --p12pwd
  *   --p12pwd <pwd>    p12 密码
@@ -38,24 +48,51 @@ for (let i = 0; i < argv.length; i++) {
   else args.push(argv[i]);
 }
 
-const target = args[0];
-const projectDir = args[1];
+/**
+ * 四条命令 → 内部任务
+ *
+ * entry         走依赖图（runBuild）：前置任务自动补齐
+ * needsSigning  必须给 --p7b，不给直接报错。命令名承诺了要出签名产物，
+ *               静默退回 unsigned 是坑
+ */
+const COMMANDS = {
+  buildBin: { entry: "generateReleaseJsBin" },
+  buildApp: { entry: "packageReleaseApp" },
 
-if (!target) {
-  console.error("usage: hmlwsdk <task> <project-dir> [--work <dir>] [--plan]");
-  console.error("example: hmlwsdk signReleaseApp /path/to/apps/devdemo/devdemo");
-  console.error("      hmlwsdk --plan signReleaseApp");
+  buildSignedHap: { entry: "signReleaseHap", needsSigning: true },
+  buildSignedApp: { entry: "signReleaseApp", needsSigning: true }
+};
+
+function printUsage() {
+  console.error("usage: hmlwsdk <command> <project-dir> [options]");
+  console.error(`commands: ${Object.keys(COMMANDS).join("  ")}`);
+  console.error("example: hmlwsdk buildSignedHap /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem");
+  console.error("         hmlwsdk --plan buildSignedHap");
+}
+
+const command = args[0];
+const projectDir = args[1];
+const spec = COMMANDS[command];
+
+if (!spec) {
+  if (command) console.error(`unknown command: ${command}`);
+  printUsage();
   process.exit(1);
 }
 
-// --plan 只需要任务名，不需要工程目录
+// --plan 只需要命令名，不需要工程目录
 if (flags.plan) {
-  for (const name of plan(target)) console.log(name);
+  for (const name of plan(spec.entry)) console.log(name);
   process.exit(0);
 }
 
+if (spec.needsSigning && !flags.p7b) {
+  console.error(`${command} produces a signed artifact, but no --p7b was given (--p7b plus either --p12 + --p12pwd or --key)`);
+  process.exit(1);
+}
+
 if (!projectDir) {
-  console.error("missing project dir. usage: hmlwsdk <task> <project-dir>");
+  console.error("missing project dir. usage: hmlwsdk <command> <project-dir>");
   process.exit(1);
 }
 
@@ -83,7 +120,7 @@ const taskContext = createTaskContext({
     : undefined
 });
 
-const r = await runBuild(taskContext, target);
+const r = await runBuild(taskContext, spec.entry);
 
 if (!r.ok) {
   console.error(`\nbuild failed at ${r.failedAt}`);

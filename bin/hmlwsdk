@@ -1,0 +1,5 @@
+#!/bin/sh
+# hmlwsdk 的 macOS / Linux 入口 —— 把 bin 目录加进 PATH 之后可以直接敲 hmlwsdk
+#
+# 需要执行位：chmod +x bin/hmlwsdk（从 Windows 上 clone 下来的仓库没有这个位）
+exec node "$(dirname "$0")/hmlwsdk.js" "$@"

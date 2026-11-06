@@ -3,7 +3,7 @@
 纯 JavaScript 实现的 HarmonyOS **liteWearable（轻智能手表）**应用打包链。输入一个标准 DevEco 工程目录，输出 `.bin`、hap 和 `.app`。
 
 ```bash
-node bin/hmlwsdk.js signReleaseApp /path/to/your/project
+hmlwsdk buildSignedApp /path/to/your/project --p7b my.p7b --key private-pkcs8.pem
 ```
 
 运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不依赖 native 二进制。
@@ -48,7 +48,7 @@ node bin/hmlwsdk.js signReleaseApp /path/to/your/project
 
 ### 规模与耗时
 
-Gradle 的 `assembleRelease` 实测进 117 个 task。这里按需执行：`packageReleaseHap` 跑 12 个，`signReleaseApp` 跑 15 个。
+Gradle 的 `assembleRelease` 实测进 117 个 task。这里按需执行：`buildBin` 跑 8 个、`buildSignedHap` 跑 13 个、`buildApp` 跑 14 个、`buildSignedApp` 跑 15 个。
 
 实测 devdemo 的 release 全链，资源编译 157 ms、webpack 5460 ms，其余任务都在毫秒级。
 
@@ -82,15 +82,35 @@ npm install
 cd src/ace-loader
 npm install
 cd ../..
-
-# 可选：注册成全局命令
-npm link
 ```
 
-`npm link` 之后可以省掉 `node bin/hmlwsdk.js` 前缀：
+然后把 `bin/` 加进 PATH，就能直接敲 `hmlwsdk`：
 
 ```bash
-hmlwsdk signReleaseApp /path/to/project
+# Windows（PowerShell，写进用户环境变量，重开终端生效）
+[Environment]::SetEnvironmentVariable("Path", "E:\path\to\hmlwsdk\bin;" + $env:Path, "User")
+
+# macOS / Linux（写进 ~/.bashrc 或 ~/.zshrc）
+export PATH="/path/to/hmlwsdk/bin:$PATH"
+```
+
+```bash
+hmlwsdk buildBin /path/to/project
+```
+
+`bin/` 下有三个文件，都是入口，只是装法不同：
+
+| 文件 | 谁用 |
+|---|---|
+| `bin/hmlwsdk.js` | 真正的实现，`package.json` 的 `bin` 字段指向它（`npm link` / `npm install -g` 用） |
+| `bin/hmlwsdk.cmd` | Windows 的 cmd / PowerShell。**Windows 不认 shebang**，缺了它把 `bin/` 加进 PATH 也敲不动 |
+| `bin/hmlwsdk` | macOS / Linux 的 sh 包装。从 Windows 上 clone 的仓库没有执行位，要 `chmod +x bin/hmlwsdk` |
+
+不想动 PATH 也可以走 `npm link`，它会在 npm 的全局 bin 目录里生成同类的 shim：
+
+```bash
+npm link
+hmlwsdk buildBin /path/to/project
 ```
 
 如果克隆时忘了 `--recursive`：
@@ -110,26 +130,23 @@ PNG 压缩用 Node 内置的 `node:zlib`，不额外引包。压缩参数按 lib
 ## 快速开始
 
 ```bash
-# 出 hap（12 个任务）
-npm run build:hap -- /path/to/apps/devdemo/devdemo
+# 只出 .bin（8 个任务）
+hmlwsdk buildBin /path/to/apps/devdemo/devdemo
 
-# 出 app（14 个任务）
-npm run build:app -- /path/to/apps/devdemo/devdemo
+# 出 app（14 个任务，顺带把 .bin 和两种 hap 都出了）
+hmlwsdk buildApp /path/to/apps/devdemo/devdemo
+
+# 出「里面那个 .bin 已签名」的 hap（13 个任务）
+hmlwsdk buildSignedHap /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
 
 # 出签名的 app（15 个任务）
-npm run build:signedApp -- /path/to/apps/devdemo/devdemo
+hmlwsdk buildSignedApp /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
 ```
 
-`npm run` 的 `--` 后面是传给 CLI 的参数，等价于：
+想看某个命令会跑哪些任务、不动手：
 
 ```bash
-node bin/hmlwsdk.js packageReleaseHap /path/to/apps/devdemo/devdemo
-```
-
-想看某个入口会跑哪些任务、不动手：
-
-```bash
-node bin/hmlwsdk.js --plan signReleaseApp
+hmlwsdk --plan buildSignedHap
 ```
 
 ---
@@ -139,14 +156,34 @@ node bin/hmlwsdk.js --plan signReleaseApp
 ### 基本形式
 
 ```
-node bin/hmlwsdk.js <任务名> <工程目录> [选项]
+hmlwsdk <命令> <工程目录> [选项]
 ```
 
-**没有 `build` 之类的子命令**。登记表里 15 个任务全在依赖图上，直接点名任何一个就行，没必要再包一层别名。
+四条命令。**`buildBin` / `buildApp` 出 unsigned 产物，`buildSignedHap` / `buildSignedApp` 构建完再签名。**
+
+| 命令 | 做什么 | 产出（相对 work） |
+|---|---|---|
+| `buildBin` | 只构建 `.bin` | `bin/release/entry-release-unsigned.bin` |
+| `buildApp` | 构建 `.app`（它在依赖链末端，顺带把 `.bin` 和两种 hap 都出了） | `app/release/<工程名>-release-unsigned.app`<br>`hap/release/entry-bin-release-lite-unsigned.hap`<br>`hap/release/entry-release-lite-unsigned.hap`<br>`bin/release/entry-release-unsigned.bin` |
+| `buildSignedHap` | 构建 + 签名，出「里面那个 `.bin` 已签名」的 hap | `hap/release/entry-bin-release-lite-signed.hap` |
+| `buildSignedApp` | 构建 + 签名，出签名的 `.app` | `app/release/<工程名>-release-signed.app` |
+
+`buildSignedHap` / `buildSignedApp` **必须给 `--p7b`**，不给直接报错 —— 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
+
+**没有单独的签名命令，也没有 `buildHap`。** 未签名的 hap 是 `buildSignedHap` 的中间产物（`entry-bin-release-lite-unsigned.hap`），照样留在 work 目录里；`.bin` 同理，`.app` 走 `buildApp`。
+
+`hmlwsdk <命令>` 背后仍然是 `src/registerTasks.js` 那张任务表，命令只是入口别名：
+
+```
+buildBin       → generateReleaseJsBin
+buildApp       → packageReleaseApp
+buildSignedHap → signReleaseHap
+buildSignedApp → signReleaseApp
+```
 
 ### 任务清单
 
-产出路径都相对 `work` 目录（默认 `<工程目录>/build/hmlwsdk`）：
+执行顺序只看 `src/registerTasks.js` 的 `DEPENDS` 表。命令行不再接受任务名，但调试时用 `--plan` 能看到某条命令会跑哪些：
 
 | 任务 | 做什么 | 产出（相对 work） |
 |---|---|---|
@@ -162,6 +199,7 @@ node bin/hmlwsdk.js <任务名> <工程目录> [选项]
 | `generateReleaseJsBin` | 打成 `.bin` 私有容器 | `bin/release/entry-release-unsigned.bin` |
 | `signReleaseJsBin` | 签 `.bin` | `bin/release/entry-release-signed.bin` |
 | `packageReleaseHap` | 打 hap（两种形态） | `hap/release/entry-bin-release-lite-unsigned.hap`<br>`hap/release/entry-release-lite-unsigned.hap` |
+| `signReleaseHap` | 签 hap 里那个 `.bin` | `hap/release/entry-bin-release-lite-signed.hap` |
 | `validateReleaseDistroFilterTask` | 校验 `distroFilter` | 无产物，纯校验 |
 | `packageReleaseApp` | 打 `.app` | `app/release/<工程名>-release-unsigned.app` + `pack.info` + `appInfo.json` |
 | `signReleaseApp` | 签 `.app` | `app/release/<工程名>-release-signed.app` |
@@ -171,31 +209,31 @@ node bin/hmlwsdk.js <任务名> <工程目录> [选项]
 | 选项 | 说明 |
 |---|---|
 | `--work <目录>` | 中间产物目录，默认 `<工程目录>/build/hmlwsdk` |
-| `--plan` | 只列要跑哪些任务，不执行。只需要任务名，不需要工程目录 |
-| `--p7b <文件>` | **必给才能签**。HarmonyOS profile |
+| `--plan` | 只列要跑哪些任务，不执行。只需要命令名，不需要工程目录 |
+| `--p7b <文件>` | HarmonyOS profile。`buildSignedHap` / `buildSignedApp` 必给；`buildBin` / `buildApp` 给了才签 |
 | `--p12 <文件>` | PKCS#12 私钥库，配合 `--p12pwd` |
 | `--p12pwd <密码>` | p12 密码 |
 | `--key <文件>` | 直接给 PEM 私钥，与 `--p12` 二选一 |
 | `--cert <文件>` | 替换内置的华为根 + 中间证书链 |
 
-不给 `--p7b` 就是「不签」，与 Gradle 没配 `signingConfig` 时的行为一致 —— 出 unsigned 包，下游拿 unsigned 当 signed 用。
+`buildBin` / `buildApp` 不给 `--p7b` 就是「不签」，与 Gradle 没配 `signingConfig` 时的行为一致 —— 出 unsigned 包，下游拿 unsigned 当 signed 用。
 
 ### 示例
 
 ```bash
-# 只出 hap，不签名
-node bin/hmlwsdk.js packageReleaseHap apps/devdemo/devdemo
+# 只出 .bin，不签名
+hmlwsdk buildBin apps/devdemo/devdemo
 
 # 出签名的 app，PKCS#12 私钥库
-node bin/hmlwsdk.js signReleaseApp apps/devdemo/devdemo \
+hmlwsdk buildSignedApp apps/devdemo/devdemo \
   --p7b my.p7b --p12 my.p12 --p12pwd 123456
 
-# 出签名的 app，裸 PEM 私钥
-node bin/hmlwsdk.js signReleaseApp apps/devdemo/devdemo \
+# 出签名的 hap，裸 PEM 私钥
+hmlwsdk buildSignedHap apps/devdemo/devdemo \
   --p7b my.p7b --key private-pkcs8.pem
 
 # 中间产物放到别处
-node bin/hmlwsdk.js packageReleaseHap apps/devdemo/devdemo --work /tmp/hmlw-build
+hmlwsdk buildApp apps/devdemo/devdemo --work /tmp/hmlw-build
 ```
 
 ---
@@ -265,6 +303,7 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 | `.bin`（未签名） | `bin/release/entry-release-unsigned.bin` | 私有容器，设备真正验签的对象 |
 | `.bin`（签名） | `bin/release/entry-release-signed.bin` | 有 `--p7b` 时才有 |
 | hap（`.bin` 形态） | `hap/release/entry-bin-release-lite-unsigned.hap` | 单条目，只有那个 `.bin`，stored 不压缩 |
+| hap（`.bin` 形态，已签名） | `hap/release/entry-bin-release-lite-signed.hap` | `buildSignedHap` 的产物：里面那个 `.bin` 已签名，**不带 zip 签名块**。Gradle 的同名产物会多插一个 `HAP Sig Block 42`（实测差 6585 B），本 SDK 不插，理由见[签名](#签名) |
 | hap（文件树形态） | `hap/release/entry-release-lite-unsigned.hap` | 所有源文件打平成一个 zip（devdemo 实测 92 个条目），全部 stored，无目录条目 |
 | `.app`（未签名） | `app/release/<工程名>-release-unsigned.app` | 装一份文件树形态 hap + `pack.info`，deflate 压缩 |
 | `.app`（签名） | `app/release/<工程名>-release-signed.app` | 有 `--p7b` 时才有 |
@@ -308,9 +347,9 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 
 ### 唯一顺序来源
 
-执行顺序只看 `src/registerTasks.js` 里的 `DEPENDS` 表。构建是**按需**的：跑某个入口只跑它依赖的任务，不是把 15 个从头扫一遍。所以 `packageReleaseApp` 不会带出资源编译那条链，跟 Gradle 的行为一致。
+执行顺序只看 `src/registerTasks.js` 里的 `DEPENDS` 表。构建是**按需**的：跑某个入口只跑它依赖的任务，不是把 16 个从头扫一遍。所以 `packageReleaseApp` 不会带出资源编译那条链，跟 Gradle 的行为一致。
 
-编号只是登记顺序，箭头才是依赖 —— 跑 `packageReleaseHap` 只会执行 1~12，跑 `packageReleaseApp` 会执行全部 15 个：
+编号只是登记顺序，箭头才是依赖 —— `buildBin` 只会执行 1~8 那几条，`buildSignedApp` 会执行全部 15 个（第 13 步 `signReleaseHap` 不在它的链上）：
 
 ```
 1   mergeReleaseResources
@@ -325,9 +364,10 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 10  generateReleaseJsBin             ← 7      │
 11  signReleaseJsBin                 ← 10     │
 12  packageReleaseHap                ← 4, 6, 7, 8, 9, 11 ┘
-13  validateReleaseDistroFilterTask  ← 无     ┐
-14  packageReleaseApp                ← 13, 12 │ app 链
-15  signReleaseApp                   ← 14     ┘
+13  signReleaseHap                   ← 12     ← buildSignedHap 到这儿
+14  validateReleaseDistroFilterTask  ← 无     ┐
+15  packageReleaseApp                ← 14, 12 │ app 链
+16  signReleaseApp                   ← 15     ┘
 ```
 
 `packageReleaseHap` 的依赖列了 6 个，其中几个是冗余的（`generateReleaseBinSource` 和 `compileReleaseResources` 已经通过 `signReleaseJsBin → generateReleaseJsBin → …` 覆盖），原样保留，拓扑排序会自己去重。
@@ -346,6 +386,7 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 | `generateReleaseJsBin` | `writeBin` 把目录序列化成 `.bin` |
 | `signReleaseJsBin` | 纯 JS 签名块，没配证书就把 unsigned 当 signed 传下去 |
 | `packageReleaseHap` | 两种形态都出 |
+| `signReleaseHap` | 拆开 `.bin` 形态的 hap，里面那个 `.bin` 已签就复用、没签就签，再装回去 |
 | `packageReleaseApp` | 只收文件树形态，`config.json` 和 `manifest.json` 换成紧凑单行版 |
 | `signReleaseApp` | 往 `.app` 的中央目录前插 `HAP Sig Block 42` |
 
@@ -378,11 +419,20 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 | `loadCerts.js` | 内置的华为根 + 中间证书链 |
 | `index.js` | `prepareSigning()` 入口 |
 
-### hap 层为什么不签
+### hap 层签的是什么
 
-设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip（`hap-sign-utils` 的产物就是这样，zip 里没有任何额外签名结构）。Gradle 的 `signReleaseHap` 会插 `HAP Sig Block 42`，格式已经逆出来了（在 `signZip.js` 里），但按项目取舍不做，任务标 `not planned`。
+设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：拿到 `.bin` 形态的 hap，把里面那个 `.bin` 签好（构建链上 `signReleaseJsBin` 已经签过，直接复用），再装回去 —— 产物 `entry-bin-release-lite-signed.hap`，里面那份 `.bin` 与 `bin/release/entry-release-signed.bin` 逐字节相同。
 
-`.app` 里装的那两个 hap 也保持原样不重签 —— 实测用 jar 签出的 `.app` 里，`entry-release-lite.hap` 仍是未签的 144 条目文件树形态。
+Gradle 的 `signReleaseHap` 在同样的事情之外，还会往 hap 这个 zip 的中央目录前再插一个 `HAP Sig Block 42`（格式已经逆出来了，就在 `signZip.js` 里，`.app` 用的同一套）。实测 `apps/_3rd/随机事件` 的一对 debug 产物：
+
+```
+entry-bin-debug-lite-unsigned.hap   6906826 B   里面是 entry-debug-signed.bin（6906662 B，已签）
+entry-bin-debug-lite-signed.hap     6913411 B   同一个 .bin，字节完全相同
+```
+
+差的 6585 B 全是那个 zip 签名块。**本 SDK 不插它** —— 设备认的是 `.bin` 的签名，这层块没有验证价值，加了反而让产物和 Gradle 多一处需要对照的差异。
+
+`.app` 里的 hap 也保持原样不重签 —— 实测用 jar 签出的 `.app` 里，`entry-release-lite.hap` 仍是未签的 144 条目文件树形态；`.app` 自己的签名是 zip 层的 `HAP Sig Block 42`，那个是要插的（`buildSignedApp` 会做），因为验证方（`hapsigntoolv2.jar verify`）读的就是它。
 
 ### 移植时的四个坑
 
@@ -409,6 +459,7 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 | 资源编译 | 与 restool 1.022 的产物逐文件比对 | `R.txt` / `resources.index` 字节一致；png 像素一致（压缩字节差几 B） |
 | `.bc` 生成 | devdemo 22 个 bundle 分别喂 wasm 和 SDK 的 `jerry-snapshot.exe`（debug、release 各一轮） | 22/22 逐字节一致 |
 | `.bin` 签名 | 与 Gradle 产物逐段对比 | `proBlock` / `signBlock` / econtent 头完全一致 |
+| hap 签名 | `buildSignedHap` 产出的 hap 里那份 `.bin` 与 `entry-release-signed.bin` 比对 | 逐字节相同（devdemo，2.3 MB / 92 条目） |
 | `.app` 签名 | 产出的包交给 `hapsigntoolv2.jar` 跑 `verify` | Verify success |
 | 端到端 | devdemo release 的 `.bin` 对比 Gradle 的 `entry-release-unsigned.bin` | 92 个条目一条不差；其中 83 个字节相同，9 个不同（原因见[已知差异](#已知差异与局限)） |
 
@@ -444,7 +495,7 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 | 项 | 状态 |
 |---|---|
 | debug 变体 | 不做。debug 只出 `.bin` 形态且不压缩，发布用不上 |
-| hap 层签名（`signReleaseHap`） | 不做，见[签名](#签名) |
+| hap 的 zip 层签名（`HAP Sig Block 42`） | 不做。`buildSignedHap` 只保证里面那个 `.bin` 已签名，理由见[签名](#签名) |
 | `symbol` 类型的资源 | 不支持，api6 的 restool 也拒收 |
 | `id` 类型的资源 | 不支持，要走 `id_defined.json` |
 | 多模块 / Har 依赖 | 未实现，目前只处理单个 `entry` 模块 |
@@ -473,7 +524,7 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 | `签名至少要给 p7b 路径（--p7b）` | 给了 `--p12` / `--key` 但没给 `--p7b` |
 | `证书链里只找到 N 张证书，至少要根+中间两张` | `--cert` 给的文件里证书不全 |
 | 签出来了但装不上 | p7b 的叶子证书与私钥不配对。见[签名](#签名)第 1 条坑 |
-| `没有这个任务：xxx` | 任务名拼错。`node bin/hmlwsdk.js --plan <任务名>` 会报可用列表 |
+| `没有这个命令：xxx` | 命令名拼错。`hmlwsdk` 不带参数跑一次会打印四条命令 |
 
 产物不对的两种情况：
 
@@ -522,31 +573,36 @@ const ctx = createTaskContext({
   projectDir, moduleDir, work, srcConfig,
   compileSdkVersion, compatibleSdkVersion
 });
-const r = await runBuild(ctx, "packageReleaseHap");
+const r = await runBuild(ctx, "signReleaseHap");
 ```
 
 `runBuild` 的第三个参数是进度回调，默认 `console.log`。任务函数允许返回 Promise（`compileReleaseJsWithNode` 要 await wasm 生成 `.bc`），内部统一 await。
+
+第二个参数是**内部任务名**（`generateReleaseJsBin` / `signReleaseHap` …），不是 CLI 的四条命令名 —— 命令行那四个只是入口别名，映射表在 `bin/hmlwsdk.js` 的 `COMMANDS` 里。
 
 ---
 
 ## 目录结构
 
 ```
-bin/hmlwsdk.js          CLI 入口，package.json 的 bin 字段注册成 hmlwsdk 命令
+bin/hmlwsdk.js          CLI 实现，package.json 的 bin 字段指向它
+bin/hmlwsdk.cmd         Windows 的 cmd / PowerShell 入口（Windows 不认 shebang）
+bin/hmlwsdk             macOS / Linux 的 sh 入口
 src/
   index.js              包的统一导出
   runBuild.js           按依赖图跑任务：拓扑排序，只跑目标任务的依赖
-  registerTasks.js      15 个任务的登记表 + DEPENDS 依赖图 ← 查执行顺序看这里
+  registerTasks.js      16 个任务的登记表 + DEPENDS 依赖图 ← 查执行顺序看这里
   createTaskContext.js  造任务间传的上下文对象 + todo()
   findTools.js          定位 src/ace-loader，以及用哪个 node
   parseBuildGradle.js   读 compileSdkVersion / compatibleSdkVersion
 
-  ── 15 个流程步骤，一文件一步，文件名 = Gradle 任务名 ──
+  ── 16 个流程步骤，一文件一步，文件名 = Gradle 任务名 ──
   mergeReleaseResources.js / mergeReleaseProfile.js / generateReleaseJsManifest.js
   compileReleaseJsWithNode.js / processReleaseProfile.js / compileReleaseResources.js
   generateReleaseBinSource.js / processReleaseJavaRes.js / processReleaseLibsFile.js
   generateReleaseJsBin.js / signReleaseJsBin.js / packageReleaseHap.js
-  validateReleaseDistroFilterTask.js / packageReleaseApp.js / signReleaseApp.js
+  signReleaseHap.js / validateReleaseDistroFilterTask.js / packageReleaseApp.js
+  signReleaseApp.js
 
   ── 上面这些步骤调用的实现 ──
   processConfig.js      mergeProfile / processProfile / stringifyConfig
@@ -591,8 +647,9 @@ src/
 
 1. 在 `src/` 下建 `<任务名>.js`，导出 `name` / `produces` / `run(taskContext)`
 2. 在 `src/registerTasks.js` 的 `TASKS` 数组和 `DEPENDS` 表里登记
-3. `node bin/hmlwsdk.js --plan <新任务名>` 确认拓扑顺序对
-4. 拿真实工程跑一遍，把产物字节数写进注释
+3. 想让它能直接从命令行跑，就在 `bin/hmlwsdk.js` 的 `COMMANDS` 里加一条别名
+4. `hmlwsdk --plan <命令名>`（或 `plan("<任务名>")`）确认拓扑顺序对
+5. 拿真实工程跑一遍，把产物字节数写进注释
 
 ### 重新验证 `.bc` 生成
 

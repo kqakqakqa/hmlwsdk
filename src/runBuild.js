@@ -1,12 +1,14 @@
 import { DEPENDS, findTask } from "./registerTasks.js";
 
 /**
- * 按需构建 —— 给一个入口任务名，只跑它依赖的那些，不是把 15 个从头扫一遍
+ * 按需构建 —— 给一个入口任务名，只跑它依赖的那些，不是把 16 个从头扫一遍
  *
  * 跟 Gradle 的行为一致：`gradlew packageReleaseApp` 不会带出资源编译那条链，
  * 因为它不在依赖图里。
  *
  * 依赖数据在 src/registerTasks.js 的 DEPENDS 表里，出处是报告的 kids 字段。
+ *
+ * 两个导出：resolveOrder / plan 只算顺序，runBuild 真跑整条依赖链。
  */
 
 /**
@@ -49,10 +51,34 @@ export function plan(target) {
 }
 
 /**
- * 真跑
+ * 跑单个任务并计时，失败不抛而是收进返回值
  *
  * async：compileReleaseJsWithNode 要 await wasm 版的 jerry-snapshot 生成 .bc，
  * 所以任务函数允许返回 Promise，这里统一 await。同步任务照旧直接返回，不受影响。
+ *
+ * @returns {{name:string, ok:boolean, ms:number, error?:string}}
+ */
+async function runOne(taskContext, name, log) {
+  const task = findTask(name);
+  if (!task) throw new Error(`task not registered: ${name}`);
+
+  const t0 = Date.now();
+
+  try {
+    await task.run(taskContext);
+    const ms = Date.now() - t0;
+    log(`✓ ${name.padEnd(32)} ${String(ms).padStart(6)} ms`);
+    return { name, ok: true, ms };
+  } catch (e) {
+    const ms = Date.now() - t0;
+    const first = String(e.message ?? e).split("\n")[0];
+    log(`✗ ${name.padEnd(32)} ${String(ms).padStart(6)} ms  ${first}`);
+    return { name, ok: false, ms, error: String(e.message ?? e) };
+  }
+}
+
+/**
+ * 真跑
  *
  * @param {object} taskContext 见 src/createTaskContext.js 的 createTaskContext
  * @param {string} target 入口任务名
@@ -66,21 +92,9 @@ export async function runBuild(taskContext, target, log = console.log) {
   log(`── ${target}: ${order.length} task(s) to run ────────────────`);
 
   for (const name of order) {
-    const task = findTask(name);
-
-    const t0 = Date.now();
-    try {
-      await task.run(taskContext);
-      const ms = Date.now() - t0;
-      results.push({ name, ok: true, ms });
-      log(`✓ ${name.padEnd(32)} ${String(ms).padStart(6)} ms`);
-    } catch (e) {
-      const ms = Date.now() - t0;
-      const first = String(e.message ?? e).split("\n")[0];
-      results.push({ name, ok: false, ms, error: String(e.message ?? e) });
-      log(`✗ ${name.padEnd(32)} ${String(ms).padStart(6)} ms  ${first}`);
-      return { ok: false, results, failedAt: name };
-    }
+    const r = await runOne(taskContext, name, log);
+    results.push(r);
+    if (!r.ok) return { ok: false, results, failedAt: name };
   }
 
   log(`── done: all ${results.length} task(s) executed ────────────────`);

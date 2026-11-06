@@ -10,11 +10,6 @@
   "exports": {
     ".": "./src/index.js"
   },
-  "scripts": {
-    "build:hap": "node bin/hmlwsdk.js packageReleaseHap",
-    "build:app": "node bin/hmlwsdk.js packageReleaseApp",
-    "build:signedApp": "node bin/hmlwsdk.js signReleaseApp"
-  },
   "dependencies": {
     "jsrsasign": "^11.1.1"
   },

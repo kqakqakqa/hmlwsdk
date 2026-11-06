@@ -1,10 +1,12 @@
 /**
- * 15 个任务按依赖顺序登记 —— 这个顺序就是 build.js 的执行顺序
+ * 16 个任务按依赖顺序登记 —— 这个顺序就是 build.js 的执行顺序
  *
  * 顺序依据：doc/gradle-build-report.html 的 01 节（按依赖深度从小到大）。
  * 已移除 7 个空方法任务，它们 run() 里没有一条指令，不在链上。
  * 另外移除 3 个 status = "not planned" 的纯占位（zipSources / validateUploadState /
  * signReleaseHap），它们的 run() 是空的或直接 return null，永远不执行。
+ * 后来 signReleaseHap 补上了 —— 但只签 hap 里那个 .bin，不插 zip 签名块，
+ * 见 src/signReleaseHap.js 顶部的说明。
  *
  * 只做 release 变体。debug 构建已放弃：debug 只出 1 个 .bin 形态的包，
  * 且不压缩，发布用不上。验证基准是 apps/devdemo/devdemo 的 release 产物。
@@ -22,6 +24,7 @@ import * as processReleaseLibsFile from "./processReleaseLibsFile.js";
 import * as generateReleaseJsBin from "./generateReleaseJsBin.js";
 import * as signReleaseJsBin from "./signReleaseJsBin.js";
 import * as packageReleaseHap from "./packageReleaseHap.js";
+import * as signReleaseHap from "./signReleaseHap.js";
 
 import * as validateReleaseDistroFilterTask from "./validateReleaseDistroFilterTask.js";
 import * as packageReleaseApp from "./packageReleaseApp.js";
@@ -41,6 +44,7 @@ export const TASKS = [
   generateReleaseJsBin,
   signReleaseJsBin,
   packageReleaseHap,
+  signReleaseHap,
 
   // App 链，3 步
   validateReleaseDistroFilterTask,
@@ -78,6 +82,9 @@ export const DEPENDS = {
     "compileReleaseResources",
     "compileReleaseJsWithNode"
   ],
+  // 只依赖 packageReleaseHap —— 它要拆的就是那个 .bin 形态的 hap。
+  // 文件树形态的 hap 里没有 .bin，签不了，所以跟它无关。
+  signReleaseHap: ["packageReleaseHap"],
 
   validateReleaseDistroFilterTask: [],
   packageReleaseApp: ["validateReleaseDistroFilterTask", "packageReleaseHap"],
