@@ -1,5 +1,7 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
+import { createHash } from "crypto";
 
 import { readProject } from "./readProject.js";
 import { mergeProfile } from "./processConfig.js";
@@ -30,19 +32,19 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *   app        出 .app                           （给了签名配置就顺带签）
  *   signedApp  出签名后的 .app
  *
- * work 目录布局（只留真正用的，不逐层复刻中间产物）：
- *   work/R.txt                     资源 id 表，只用来回填 config，不进包
- *   work/manifest/<组件>/           webpack 的输入
- *   work/cache/                     webpack 缓存
- *   work/source/                    .bin 的原料树（config.json + assets/）
- *   work/bin/                       *.bin
- *   work/hap/                       *.hap
- *   work/app/                       *.app + pack.info
+ * 落盘的只有一份：<工程>/build/<bundleName>.<ext>，内容是哪个由 target 决定 ——
+ *   build/<bundleName>.bin   target=bin
+ *   build/<bundleName>.hap   target=signedHap
+ *   build/<bundleName>.app   target=app / signedApp
+ * 中间产物（.bin、两种 hap、pack.info）全在内存里往后传，一行都不落盘。
  *
- * 最终产物另外拷一份到 <工程>/build/ 根目录，命名用 bundleName：
- *   build/<bundleName>.app          签名版（若 cert/ 里有签名材料）
- *   build/<bundleName>.hap          单 .bin 形态的 hap，设备直接装它
- * 中间产物一律留在 build/hmlwsdk/ 里（work 的默认位置），build/ 根只放能直接用的东西。
+ * 必须落盘的只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
+ * 这些都放在系统临时目录（work），跑完整个删掉：
+ *   work/R.txt                     资源 id 表，只用来回填 config
+ *   work/manifest/<组件>/           webpack 的输入
+ *   work/source/                   .bin / hap 的原料树（config.json + assets/）
+ *   work/pack/                     pack.info（同时打进 .app，文件这份是副产物）
+ * work 放临时目录而不是工程里，工程 build/ 下就只剩那一份能直接用的产物。
  *
  * 签名材料统一从 <工程>/cert/ 读（见 readSigningConfig.js），CLI 不再传 p7b/p12。
  * 规则是「有就签、没有就不签」；target 是 signed* 时则要求必须有材料，缺了直接报错。
@@ -59,11 +61,11 @@ export const TARGETS = ["bin", "signedHap", "app", "signedApp"];
  * @param {object} opts
  * @param {string} [opts.projectDir] 工程目录（含 entry/ 的那一层），省略用 cwd
  * @param {string} opts.target        TARGETS 里的一个
- * @param {string} [opts.work]        中间产物目录，默认 <工程>/build/hmlwsdk
+ * @param {string} [opts.work]        scratch 目录，默认系统临时目录下按工程区分的一个子目录
  * @param {string} [opts.node]        跑 webpack 的 node，默认当前进程（正常从 hmlwsdk.config.js 来）
  * @param {object} [opts.signingConfig] 显式给签名材料，省略则读 <工程>/cert/
  * @param {(line:string)=>void} [opts.log]
- * @returns {Promise<object>} 各阶段产物的路径
+ * @returns {Promise<{target:string, work:string, artifact:string}>} 
  */
 export async function build(opts) {
   if (!TARGETS.includes(opts.target)) {
@@ -88,15 +90,20 @@ export async function build(opts) {
     );
   }
 
-  const work = path.resolve(opts.work ?? path.join(project.root, "build", "hmlwsdk"));
+  // webpack 是独立进程，只能靠文件系统交接，所以必须有这么一份 scratch。
+  // 放系统临时目录而不是工程里 —— 工程 build/ 下只该有命令承诺的那一份产物。
+  // 目录名带工程名 + 路径 hash：多工程不会撞，同一个工程每次都落到同一处，
+  // webpack 的 cache 才能持续复用（cache 里存着 manifest 的绝对路径）。
+  const work = path.resolve(
+    opts.work ?? path.join(os.tmpdir(), "hmlwsdk", workKey(project.root))
+  );
   const sourceRoot = path.join(work, "source");
   // 资源直接编译到这里 —— 不再有 res/ 中间目录，也就不需要「先编到 res 再拷过来」
   const assetsEntry = path.join(sourceRoot, "assets", "entry");
   const rTxtPath = path.join(work, "R.txt");
-  const binDir = path.join(work, "bin");
-  const hapDir = path.join(work, "hap");
-  const appDir = path.join(work, "app");
-  // 最终产物另外拷一份到这里，命名用 bundleName —— 见文件末尾的 publish()
+  // pack.info 的落点（它同时被打进 .app，磁盘这份是 packApp 的副产物）
+  const packDir = path.join(work, "pack");
+  // 唯一一份产物放这儿，命名用 bundleName —— 见文件末尾的 publish()
   const outRoot = path.join(project.root, "build");
 
   // mergeProfile 之后的 config 只是中间态，不落盘 —— 真正要看的是
@@ -149,121 +156,119 @@ export async function build(opts) {
   );
 
   // ── 写 .bin ─────────────────────────────────────────────────────────
-  // Buffer 留着给下一步打 hap，不从磁盘读回来
-  const binName = "entry-release-unsigned.bin";
-  const unsignedBinBuf = await step("write bin", () => {
-    const buf = writeBin({ bundleName: config.app.bundleName, entries: collectFiles(sourceRoot) });
-    fs.mkdirSync(binDir, { recursive: true });
-    fs.writeFileSync(path.join(binDir, binName), buf);
-    return buf;
-  });
-
-  const outputs = { target: opts.target, work, bin: path.join(binDir, binName) };
+  // 只在内存里出 Buffer：它要么是最终产物，要么是 hap 的内容，两种都不需要
+  // 中间那份文件。
+  const unsignedBinBuf = await step("write bin", () =>
+    writeBin({ bundleName: config.app.bundleName, entries: collectFiles(sourceRoot) })
+  );
 
   // cert/ 里没材料时不签，unsigned 直接当 signed 往下传
   let binForHap = unsignedBinBuf;
-  let binForHapName = binName;
+  let binForHapName = "entry-release-unsigned.bin";
   if (signingConfig) {
     binForHapName = "entry-release-signed.bin";
-    binForHap = await step("sign bin", () =>
-      signBinFile(unsignedBinBuf, path.join(binDir, binForHapName), signingConfig)
-    );
-    outputs.signedBin = path.join(binDir, binForHapName);
+    binForHap = await step("sign bin", () => signBinBuffer(unsignedBinBuf, signingConfig));
   }
 
-  if (opts.target === "bin") return outputs;
+  // 收尾：把唯一一份产物放到 build/ 根、清掉 scratch、返回它的路径。
+  // 四个 target 都从这里出去，所以「只落一份」这件事只有一个实现点。
+  const done = (buf, ext) => {
+    const artifact = publish(buf, outRoot, config.app.bundleName, ext);
+    if (!signingConfig) {
+      log(`! no signing material in ${CERT_DIR}/, ${path.basename(artifact)} is unsigned and cannot be installed on a watch`);
+    }
+    cleanWork(work);
+    return { target: opts.target, work, artifact };
+  };
 
-  // ── 两种 hap ────────────────────────────────────────────────────────
-  fs.mkdirSync(hapDir, { recursive: true });
+  if (opts.target === "bin") return done(binForHap, ".bin");
 
   // ── .bin 形态的 hap ─────────────────────────────────────────────────
-  // 设备直接装的就是这种（里面只有那一个 .bin）。不管后面出不出 .app 都要，
-  // 所以两种 target 共用同一份 Buffer。
+  // 设备直接装的就是这种（里面只有那一个 .bin）。它进不了 .app，所以只有
+  // target=signedHap 时才是产物，其它 target 下打完就扔 —— Buffer 而已。
   // 原来的实现是「打成 hap → 拆开读出 .bin → 判断已签 → 装回去」，那个拆包
   // 一步纯属白做：hap 就是把 .bin 塞进 zip，Buffer 直接拿来打就行。
-  const binHap = await step("pack bin hap", () => {
-    const buf = packBinHap(binForHap, binForHapName);
-    fs.writeFileSync(path.join(hapDir, "entry-bin-release-lite-unsigned.hap"), buf);
-    return buf;
-  });
-  outputs.binHap = path.join(hapDir, "entry-bin-release-lite-unsigned.hap");
+  const binHap = await step("pack bin hap", () => packBinHap(binForHap, binForHapName));
 
   if (opts.target === "signedHap") {
     // 不往 hap 的 zip 里插 "HAP Sig Block 42" —— 设备验的是 .bin 自己的签名块，
-    // 那层块没有验证价值。所以这里只是换个名字存一份。
-    const signed = path.join(hapDir, "entry-bin-release-lite-signed.hap");
-    fs.writeFileSync(signed, binHap);
-    outputs.hap = signed;
-    outputs.publishedHap = publish(signed, outRoot, config.app.bundleName, ".hap");
-    return outputs;
+    // 那层块没有验证价值。
+    return done(binHap, ".hap");
   }
 
   // 文件树形态：.bin 形态进不了 .app（PackageApp 会过滤文件名含 -bin- 的）
-  const treeHapPath = path.join(hapDir, "entry-release-lite-unsigned.hap");
-  const treeHapBuf = await step("pack tree hap", () => {
-    const buf = packTreeHap(sourceRoot, config);
-    fs.writeFileSync(treeHapPath, buf);
-    return buf;
-  });
-  outputs.treeHap = treeHapPath;
+  const treeHapBuf = await step("pack tree hap", () => packTreeHap(sourceRoot, config));
 
   // hapName 传 .app 里的名字：去掉了 "-unsigned"（实测 Gradle 产物就是这样）
-  const { appBuf, appPath } = await step("pack app", () =>
-    packApp({ outDir: appDir, hapBuf: treeHapBuf, hapName: "entry-release-lite.hap", config })
+  const appBuf = await step(
+    "pack app",
+    () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: "entry-release-lite.hap", config }).appBuf
   );
-  outputs.app = appPath;
 
   // 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
   // 与 buildBin 的行为一致
-  if (signingConfig) {
-    outputs.signedApp = await step("sign app", () => {
-      const buf = signApp({ appBuf, signingConfig });
-      const out = appPath.replace("-unsigned", "-signed");
-      fs.writeFileSync(out, buf);
-      return out;
-    });
-  }
+  const finalApp = signingConfig
+    ? await step("sign app", () => signApp({ appBuf, signingConfig }))
+    : appBuf;
 
-  // 拷到 build/ 根：这两份就是给人直接拿去装/发布的，中间产物留在 build/hmlwsdk/ 下
-  outputs.publishedHap = publish(outputs.binHap, outRoot, config.app.bundleName, ".hap");
-  outputs.publishedApp = publish(outputs.signedApp ?? appPath, outRoot, config.app.bundleName, ".app");
-
-  if (!signingConfig) {
-    log(`! no signing material in ${CERT_DIR}/, the artifacts under build/ are unsigned and cannot be installed on a watch`);
-  }
-  return outputs;
+  return done(finalApp, ".app");
 }
 
 /**
- * 把中间产物拷到 <工程>/build/ 根，文件名用 bundleName
+ * 把唯一一份产物写到 <工程>/build/ 根，文件名用 bundleName
  *
- * 中间产物留在 build/hmlwsdk/ 里，保留 -unsigned / -signed / -bin- 这些区分；
- * build/ 根只放一份能直接用的，免得用户在一堆同前缀文件里挑。
+ * 中间产物一个都不留，所以这里不需要「挑哪个是给人用的」—— 进来的就是答案。
+ * 顺手删掉同 bundleName 的其它形态（.app / .hap / .bin）：那是上一次别的 target
+ * 留下的，留着会让人装到旧包。
  */
-function publish(src, outRoot, bundleName, ext) {
+function publish(buf, outRoot, bundleName, ext) {
   const dest = path.join(outRoot, `${bundleName}${ext}`);
   fs.mkdirSync(outRoot, { recursive: true });
-  fs.copyFileSync(src, dest);
+  for (const other of [".app", ".hap", ".bin"]) {
+    if (other !== ext) fs.rmSync(path.join(outRoot, `${bundleName}${other}`), { force: true });
+  }
+  fs.writeFileSync(dest, buf);
   return dest;
 }
 
 /**
- * 给 .bin 签名并落盘，把签名后的 Buffer 一起返回给打 hap 用
+ * scratch 目录名：工程名 + 路径 hash
+ *
+ * 同一个工程每次都要落到同一处 —— webpack 的 cache 里存着 manifest 的绝对路径，
+ * 换个目录就拿到陈旧缓存、报 Module not found（见 runWebpack.js 的 cachePath 注释）。
+ */
+function workKey(projectRoot) {
+  const base = path.basename(projectRoot).replace(/[^\w.-]+/g, "_") || "project";
+  const hash = createHash("sha256").update(projectRoot.toLowerCase()).digest("hex").slice(0, 8);
+  return `${base}-${hash}`;
+}
+
+/**
+ * 删掉整个 scratch
+ *
+ * 里面只有 source / manifest / R.txt / pack，每次构建都会重写，留着没意义。
+ * runWebpack 虽然传了 cachePath=<work>/cache，但这份 ace-loader 的配置并不读它
+ * （webpack.lite.config.js 里没有任何 cache 相关代码），实测连跑两次都是 3 s、
+ * work 下从来没出现过 cache 目录 —— 所以没有需要挑着留下的东西。
+ */
+function cleanWork(work) {
+  fs.rmSync(work, { recursive: true, force: true });
+}
+
+/**
+ * 给 .bin 签名，返回签名后的 Buffer
  * 签名格式见 sign/signBin.js
  */
-function signBinFile(unsignedBuf, outPath, signingConfig) {
+function signBinBuffer(unsignedBuf, signingConfig) {
   const signing = prepareSigning(signingConfig);
 
-  const signed = signBin({
+  return signBin({
     unsignedBin: unsignedBuf,
     p7b: signing.p7b,
     keyPem: signing.keyPem,
     certPems: signing.certPems,
     signTime: signing.signTime
   });
-
-  fs.writeFileSync(outPath, signed);
-  return signed;
 }
 
 /**

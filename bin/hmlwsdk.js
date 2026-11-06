@@ -30,12 +30,16 @@ import { readProjectConfig } from "../src/readProjectConfig.js";
  *
  * 四条 build 命令：
  *   buildBin        出 .bin
- *   buildApp        出 .app（顺带出 .bin 形态的 hap、.bin），cert/ 有材料就签
+ *   buildApp        出 .app，cert/ 有材料就签
  *   buildSignedHap  出「里面那个 .bin 已签名」的 hap，要求 cert/ 有材料
  *   buildSignedApp  出签名后的 .app，要求 cert/ 有材料
  *
- * 最终产物落在 <工程>/build/ 根：<bundleName>.app、<bundleName>.hap（单 .bin 形态），
- * 中间产物在 <工程>/build/hmlwsdk/ 下。
+ * 最终产物只有一份，落在 <工程>/build/ 根，名字用 bundleName：
+ *   buildBin        build/<bundleName>.bin
+ *   buildApp        build/<bundleName>.app
+ *   buildSignedHap  build/<bundleName>.hap
+ *   buildSignedApp  build/<bundleName>.app
+ * 中间产物（.bin、两种 hap、pack.info）不落盘，只在内存里往后传。
  */
 
 /** 本文件在 <SDK>/bin 下，往上一级就是 SDK 根 */
@@ -64,7 +68,7 @@ function printUsage() {
   console.error("  create           scaffold a new project from the built-in template (the dir arg is the literal target path, defaults to cwd)");
   console.error("  init             turn a project into one-command builds (creates config / cert / build)");
   console.error("  buildBin         .bin");
-  console.error("  buildApp         .app (plus the .bin-form hap and the .bin), signed when cert/ has material");
+  console.error("  buildApp         .app, signed when cert/ has material");
   console.error("  buildSignedHap   the hap whose inner .bin is signed (requires material in cert/)");
   console.error("  buildSignedApp   the signed .app (requires material in cert/)");
   console.error("");
@@ -106,11 +110,12 @@ try {
   process.exit(1);
 }
 
+/**
+ * 打印那一份产物
+ *
+ * build() 现在只落一个文件，所以这里就一行 —— 早先它把 outputs 里每条路径都
+ * 列出来，六行里有四行是中间产物，看着像生成了六个包。
+ */
 function printOutputs(outputs) {
-  console.log("\noutputs:");
-  for (const [kind, p] of Object.entries(outputs)) {
-    if (kind === "target" || kind === "work") continue;
-    console.log(`  ${kind.padEnd(14)} ${p}`);
-  }
-  console.log(`\nwork dir: ${outputs.work}`);
+  console.log(`\noutputs:\n  ${outputs.artifact}`);
 }
