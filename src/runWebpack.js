@@ -5,9 +5,9 @@ import { spawnSync } from "child_process";
 import { resolveTools, resolveNode } from "./findTools.js";
 
 /**
- * 调 node + ace-loader/webpack 编译 JS/HML/CSS
+ * 跑一次 webpack —— 只负责 spawn，不管 manifest、不管 .bc、不管清理
  *
- * 对应 Gradle 的 compileReleaseJsWithNode。
+ * 完整的「编译 JS」这一步在 compileJs.js，它对每个组件调一次这里。
  *
  * 实测命令（apps/_empty/_empty）：
  *   node --openssl-legacy-provider <ace-loader>/node_modules/webpack/bin/webpack.js
@@ -27,7 +27,7 @@ import { resolveTools, resolveNode } from "./findTools.js";
  * 注意：webpack.lite.config.js 第 138 行会 deleteFolderRecursive(buildPath)，
  * 所以 opts.buildDir 必须是专用目录，不要指到别的产物目录上。
  */
-export function compileJs(opts) {
+export function runWebpack(opts) {
   const tools = opts.tools ?? resolveTools();
   const node = opts.node ?? resolveNode();
 

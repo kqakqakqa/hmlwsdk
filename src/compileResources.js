@@ -6,21 +6,20 @@ import { parseElementJson, composeStrings } from "./parseElementJson.js";
 import { writeResourceIndex } from "./writeResourceIndex.js";
 import { writeResourceTable } from "./writeResourceTable.js";
 import { copyResourceFiles } from "./copyResourceFiles.js";
-import { fillResourceIds } from "./parseResourceTable.js";
-import { stringifyConfig } from "./processConfig.js";
 
 /**
  * 编译模块资源 —— 替代 restool.exe
  *
- * 对外的约定和原来调 restool 时保持一致，`compileReleaseResources` 只改一个调用点。
- *
  * 产出（都在 outDir 下）：
  *   resources.index                      资源索引，见 writeResourceIndex.js
  *   R.txt                                资源 id 文本表，见 writeResourceTable.js
- *   config.json                          回填了 iconId/labelId/descriptionId 的配置
  *   resources/<限定>/media/…             图片（可压缩）+ 4 个空 .key
  *   resources/<限定>/profile/…           profile json 原样复制
  *   resources/rawfile/…                  rawfile 整棵复制
+ *
+ * 不产出 config.json。早先这里会写一份「回填过资源 id」的 config，理由是
+ * 「让 res 目录结构和 Gradle 对上」—— 但那份文件没有任何读者（真正打进包的那份
+ * 由 assembleAssets 从 R.txt 重新回填后写到 source/config.json），已经删掉。
  *
  * 不产出 ResourceTable.java —— 那是给 Java 编译链用的，liteWearable 走 JS，
  * Gradle 的 lite 产物目录里也没有这个文件。
@@ -52,12 +51,14 @@ const RES_ID_START = 0x01000000;
 /**
  * @param {object} opts
  * @param {string} opts.moduleRoot 模块根目录（src/main）
- * @param {string} opts.configPath 加工过的 config.json
  * @param {string} opts.outDir 输出目录，不存在会自动建
+ * @param {string} [opts.rTxtPath] R.txt 写到哪，默认 outDir/R.txt。
+ *   调 build.js 时会指到资源输出目录之外 —— R.txt 只用来回填 config 的资源 id，
+ *   不进包，混在产物树里会被打进 .bin
  * @param {string} [opts.moduleName] 模块名，也就是 index 里资源路径的第一段，默认 entry
  * @param {boolean} [opts.compressImage] 是否压缩图片（原来的 -z），默认 true
  * @param {boolean} [opts.force] 输出目录下已有 resources 时是否覆盖，默认 true
- * @returns {{indexFile:string, rTxtFile:string, configFile:string, stats:object}}
+ * @returns {{indexFile:string, rTxtFile:string, stats:object}}
  */
 export function compileResources(opts) {
   const outDir = opts.outDir;
@@ -107,7 +108,9 @@ export function compileResources(opts) {
   fs.writeFileSync(indexFile, writeResourceIndex(indexConfigs));
 
   // ── R.txt：同 id 的多份记录只写一行（跨限定目录视为同一个资源） ──
-  const rTxtFile = path.join(outDir, "R.txt");
+  // 默认写在 outDir 里；build.js 会把它指到外面去，因为它不进包
+  const rTxtFile = opts.rTxtPath ?? path.join(outDir, "R.txt");
+  fs.mkdirSync(path.dirname(rTxtFile), { recursive: true });
   fs.writeFileSync(rTxtFile, writeResourceTable([...idTable.values()]), "utf8");
 
   // ── 文件型资源落盘 ──
@@ -118,23 +121,7 @@ export function compileResources(opts) {
     compressImage: opts.compressImage !== false
   });
 
-  // ── config.json：回填引用到的资源 id ──
-  const configFile = path.join(outDir, "config.json");
-  writeConfigJson(opts.configPath, configFile, idTable);
-
-  return { indexFile, rTxtFile, configFile, stats };
-}
-
-/**
- * 把 idTable 摊成 parseRTable 那种「类型 → 名字 → id」的嵌套表
- * 这样 config.json 的回填可以和 R.txt 那条路共用 fillResourceIds
- */
-function toResourceTable(idTable) {
-  const rtable = {};
-  for (const item of idTable.values()) {
-    (rtable[item.typeName] ??= {})[item.name] = item.id;
-  }
-  return rtable;
+  return { indexFile, rTxtFile, stats };
 }
 
 /**
@@ -194,23 +181,4 @@ function assertNoDuplicate(limitKey, clusterName, items) {
     }
     seen.add(key);
   }
-}
-
-/**
- * 写出回填过资源 id 的 config.json
- *
- * restool 只加字段不改原值（probe 工程的产物里 icon 还是 "$media:icon"，
- * 旁边多出一个 iconId），这套白名单和遍历逻辑在 parseResourceTable.js 里，
- * 和打 .bin 时用的是同一份，避免两处规则漂移。
- *
- * 序列化用 processConfig 的 stringifyConfig。**排版和 Gradle 那份不一样**
- * （restool 用 cJSON 输出，_empty 是 1137 B；这份是 925 B），JSON 内容一致。
- * 这个文件其实没人读 —— 打 .bin 时 generateReleaseBinSource 会重新写一份到
- * js/release/source/lite/config.json。写它只是为了让 res 输出目录的结构和
- * Gradle 对得上，缺一个文件容易让人以为漏了步骤。
- */
-function writeConfigJson(configPath, outFile, idTable) {
-  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  fillResourceIds(config, toResourceTable(idTable));
-  fs.writeFileSync(outFile, stringifyConfig(config), "utf8");
 }

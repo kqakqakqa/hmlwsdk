@@ -2,10 +2,9 @@ import fs from "fs";
 import path from "path";
 
 import { writeZip } from "./readWriteZip.js";
-import { todo } from "./createTaskContext.js";
 
 /**
- * packageReleaseApp —— 把各模块的 hap 合成一个 .app
+ * 打 .app —— 把文件树形态的 hap 和 pack.info 装进一个 zip
  *
  * 实测产物（devdemo release，同一份源码）：
  *   build/outputs/app/release/
@@ -23,42 +22,24 @@ import { todo } from "./createTaskContext.js";
  *   实测印证：.app 里那份 hap 的字节数与 entry-release-lite-unsigned.hap 完全相同。
  */
 
-export const name = "packageReleaseApp";
-export const produces = "app/release/<project-name>-release-unsigned.app + pack.info + appInfo.json";
+/**
+ * @param {object} opts
+ * @param {string} opts.outDir       work/app
+ * @param {string} opts.treeHapPath  文件树形态的 hap（.bin 形态的进不了 .app）
+ * @param {object} opts.config       最终版 config
+ * @returns {{appBuf:Buffer, appPath:string, packInfoPath:string}}
+ */
+export function packApp(opts) {
+  const { outDir, hapBuf, hapName, config } = opts;
 
-export function run(taskContext) {
-  if (!taskContext.paths.treeHap) {
-    todo(name, "missing the file-tree hap: .app only takes the file-tree form, the .bin form gets filtered out. run packageReleaseHap first");
-  }
-  if (!taskContext.config) todo(name, "missing taskContext.config");
-
-  const outDir = path.join(taskContext.work, "app", "release");
   fs.mkdirSync(outDir, { recursive: true });
 
-  const hapName = path.basename(taskContext.paths.treeHap).replace("-unsigned", "");
-  const hapBuf = fs.readFileSync(taskContext.paths.treeHap);
   const moduleName = hapName.replace(/\.hap$/, "");
 
   // pack.info：summary（来自 config）+ packages（来自 hap 文件名）
-  const packInfoText = JSON.stringify(buildPackInfo(taskContext.config, moduleName), null, 4);
-  fs.writeFileSync(path.join(outDir, "pack.info"), packInfoText);
-
-  // appInfo.json：只记录每个包的名字和大小，是中间文件，不进 .app
-  const appInfoText = JSON.stringify(
-    {
-      packages: [
-        {
-          moduleType: taskContext.config.module?.distro?.moduleType ?? "entry",
-          moduleName: taskContext.config.module?.distro?.moduleName ?? "entry",
-          packageName: moduleName,
-          packageSize: String(hapBuf.length)
-        }
-      ]
-    },
-    null,
-    4
-  );
-  fs.writeFileSync(path.join(outDir, "appInfo.json"), appInfoText);
+  const packInfoText = JSON.stringify(buildPackInfo(config, moduleName), null, 4);
+  const packInfoPath = path.join(outDir, "pack.info");
+  fs.writeFileSync(packInfoPath, packInfoText);
 
   // .app 本体：两个条目，都 deflate 压缩
   const appBuf = writeZip(
@@ -69,13 +50,12 @@ export function run(taskContext) {
     { compress: true }
   );
 
-  const projectName = taskContext.config.app.bundleName.split(".").pop();
+  const projectName = config.app.bundleName.split(".").pop();
   const appPath = path.join(outDir, `${projectName}-release-unsigned.app`);
   fs.writeFileSync(appPath, appBuf);
 
-  taskContext.paths.app = appPath;
-  taskContext.paths.packInfo = path.join(outDir, "pack.info");
-  return appPath;
+  // appBuf 也返回：签名直接用它，不用把刚写下去的文件再读回来
+  return { appBuf, appPath, packInfoPath };
 }
 
 /**

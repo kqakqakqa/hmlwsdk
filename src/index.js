@@ -7,7 +7,7 @@
  *   ─────────────────────────────────────────────────────────────────────
  *   bin 读写          4 个真实 .bin 解析后重建，比对 SHA256            字节级一致
  *   zip 读写          hap 打包后与 Gradle 产物对比                    条目内容一致
- *   config 加工       源码 → merge → process → 回填资源号            三阶段内容一致
+ *   config 加工       源码 → 加工 → 回填资源号                        三阶段内容一致
  *   资源编译          纯 JS 重写，对比 restool 1.022 的产物            index / R.txt 字节一致；
  *                                                                    png 像素一致（压缩改用
  *                                                                    node:zlib，字节差几 B）
@@ -16,15 +16,18 @@
  *                                                                    econtent 头完全一致
  *   .app 签名         产出的包交给 hapsigntoolv2 的 verify             Verify success
  *
- * 资源编译（resources.index / R.txt / 图片压缩）已经不再调 restool.exe，
+ * 资源编译（resources.index / R.txt / 图片压缩）不调 restool.exe，
  * 实现在 compileResources.js，格式来源见各模块注释。
  *
  * 图片转 .bin 不由本 SDK 负责 —— ace-loader 的 lite-image2bin.js 在 webpack 阶段
  * 顺手就做了，本 SDK 只负责删掉它留下的 xxx.png.bin 双后缀副本。
  */
 
-export { resolveTools, resolveNode } from "./findTools.js";
+// 整条链
+export { build, TARGETS } from "./build.js";
+export { readProject } from "./readProject.js";
 
+// 容器格式
 export {
   readBin,
   writeBin,
@@ -32,19 +35,28 @@ export {
   stripSignature,
   SIGN_HEAD_ASCII
 } from "./readWriteBin.js";
-
-export { packHap } from "./packHap.js";
-
 export { readZip, writeZip, crc32 } from "./readWriteZip.js";
+export { collectFiles, entryPath } from "./collectFiles.js";
 
-export { mergeProfile, processProfile, stringifyConfig } from "./processConfig.js";
+// 打包
+export { packBinHap, packTreeHap } from "./packHap.js";
+export { packApp } from "./packApp.js";
+export { signApp } from "./signApp.js";
 
+// 配置
+export { mergeProfile, stringifyConfig, stringifyConfigMinified } from "./processConfig.js";
 export { parseRTable, fillResourceIds } from "./parseResourceTable.js";
 
+// 资源
 export { compileResources } from "./compileResources.js";
-
 export { compressPng, isSupportedPng } from "./compressPng.js";
 
-export { compileJs } from "./runWebpack.js";
+// JS
+export { compileJs } from "./compileJs.js";
+export { runWebpack } from "./runWebpack.js";
 
+// 工具
+export { resolveTools, resolveNode } from "./findTools.js";
+
+// 签名
 export { prepareSigning, signBin, signZip, parseP7b, loadPrivateKey, slicedSha256 } from "./sign/index.js";

@@ -1,25 +1,31 @@
 /**
  * config.json 加工
  *
- * 对应 Gradle 的两个 task：
- *   mergeProfile   —— 把 build.gradle 里的 SDK 版本、variant 信息合进 config.json
- *   processProfile —— 再加工一遍（实测只调整了键顺序，内容不变）
+ * Gradle 把这件事拆成两个 task：mergeProfile 注入版本信息、processProfile 再加工一遍。
+ * 但 processProfile 实测只调整了键顺序、内容一个字都没变（api6 的 1.022 上），
+ * 所以本 SDK 只做一遍。
+ *
+ * 唯一还剩的第二个阶段是「回填资源 id」（parseResourceTable.js 的 fillResourceIds），
+ * 它必须等资源编译出 R.txt 才能做，所以留在 assembleAssets 里，不在这。
  *
  * 实测依据：apps/_empty/_empty
- *   源码 entry/src/main/config.json                690 B
- *   → merge_profile/debug/config.json             1064 B
- *   → process_profile/debug/normal/config.json    1064 B
- *   → js/debug/source/lite/config.json            1137 B（多了 iconId / labelId）
+ *   源码 entry/src/main/config.json        690 B
+ *   → Gradle 的 process_profile 产物      1064 B
+ *   → 最终打进包的 config.json            1137 B（多了 iconId / labelId）
  */
 
 /**
- * 合并阶段：注入 apiVersion、variant 开关、abilities 默认值
+ * 注入 apiVersion、abilities 默认值
+ *
+ * release 变体不写 deviceConfig.default.debug。实测 devdemo 的 release config.json 里
+ * deviceConfig 是空对象 {}，而 debug 那份是 {"default":{"debug":true}}。
+ * debug 变体本 SDK 不做（debug 只出 1 个 .bin 形态的包、webpack 还不压缩，发布用不上），
+ * 所以那个分支没必要存在。
  *
  * @param {object} source 源码里的 config.json
  * @param {object} opts
- * @param {number} opts.compileSdkVersion   来自 build.gradle 的 ohos.compileSdkVersion
+ * @param {number} opts.compileSdkVersion   来自 build.gradle 的 compileSdkVersion
  * @param {number} opts.compatibleSdkVersion 来自 defaultConfig.compatibleSdkVersion
- * @param {boolean} [opts.debug]            debug 变体时写 deviceConfig.default.debug = true
  * @param {string} [opts.releaseType]       默认 "Release"
  * @returns {object} 新的 config 对象（不改原对象）
  */
@@ -34,28 +40,12 @@ export function mergeProfile(source, opts) {
   };
 
   out.deviceConfig ??= {};
-  if (opts.debug) {
-    out.deviceConfig.default = {
-      ...(out.deviceConfig.default ?? {}),
-      debug: true
-    };
-  }
 
   for (const ab of out.module?.abilities ?? []) {
     if (ab.homeAbility === undefined) ab.homeAbility = false;
   }
 
   return out;
-}
-
-/**
- * 加工阶段：实测 gradle 只调整了键顺序，没有增删字段。
- *
- * 这里保留成独立函数，是因为后续如果要按 SDK 版本做字段迁移（比如 apiVersion
- * 的写法在更高 API 上不一样），改动应该落在这个位置。
- */
-export function processProfile(config) {
-  return structuredClone(config);
 }
 
 /**

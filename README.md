@@ -48,9 +48,10 @@ hmlwsdk buildSignedApp /path/to/your/project --p7b my.p7b --key private-pkcs8.pe
 
 ### 规模与耗时
 
-Gradle 的 `assembleRelease` 实测进 117 个 task。这里按需执行：`buildBin` 跑 8 个、`buildSignedHap` 跑 13 个、`buildApp` 跑 14 个、`buildSignedApp` 跑 15 个。
+Gradle 的 `assembleRelease` 实测进 117 个 task。这里没有任务系统，`src/build.js` 一条顺序函数走完，
+按命令不同是 6~10 步（`buildBin` 6 步、`buildApp` 8 步、`buildSignedApp` 10 步，给了 `--p7b` 各加一步签名）。
 
-实测 devdemo 的 release 全链，资源编译 157 ms、webpack 5460 ms，其余任务都在毫秒级。
+实测 devdemo 的 release 全链，资源编译 66 ms、webpack 5.3 s，其余步骤都在毫秒级。
 
 | 依赖 | Gradle 插件 | hmlwsdk |
 |---|---|---|
@@ -130,23 +131,17 @@ PNG 压缩用 Node 内置的 `node:zlib`，不额外引包。压缩参数按 lib
 ## 快速开始
 
 ```bash
-# 只出 .bin（8 个任务）
+# 只出 .bin
 hmlwsdk buildBin /path/to/apps/devdemo/devdemo
 
-# 出 app（14 个任务，顺带把 .bin 和两种 hap 都出了）
+# 出 .app（顺带把两种 hap 和 .bin 都出了）
 hmlwsdk buildApp /path/to/apps/devdemo/devdemo
 
-# 出「里面那个 .bin 已签名」的 hap（13 个任务）
+# 出「里面那个 .bin 已签名」的 hap
 hmlwsdk buildSignedHap /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
 
-# 出签名的 app（15 个任务）
+# 出签名的 app
 hmlwsdk buildSignedApp /path/to/apps/devdemo/devdemo --p7b my.p7b --key private-pkcs8.pem
-```
-
-想看某个命令会跑哪些任务、不动手：
-
-```bash
-hmlwsdk --plan buildSignedHap
 ```
 
 ---
@@ -159,57 +154,54 @@ hmlwsdk --plan buildSignedHap
 hmlwsdk <命令> <工程目录> [选项]
 ```
 
-四条命令。**`buildBin` / `buildApp` 出 unsigned 产物，`buildSignedHap` / `buildSignedApp` 构建完再签名。**
+四条命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名配置。
 
 | 命令 | 做什么 | 产出（相对 work） |
 |---|---|---|
-| `buildBin` | 只构建 `.bin` | `bin/release/entry-release-unsigned.bin` |
-| `buildApp` | 构建 `.app`（它在依赖链末端，顺带把 `.bin` 和两种 hap 都出了） | `app/release/<工程名>-release-unsigned.app`<br>`hap/release/entry-bin-release-lite-unsigned.hap`<br>`hap/release/entry-release-lite-unsigned.hap`<br>`bin/release/entry-release-unsigned.bin` |
-| `buildSignedHap` | 构建 + 签名，出「里面那个 `.bin` 已签名」的 hap | `hap/release/entry-bin-release-lite-signed.hap` |
-| `buildSignedApp` | 构建 + 签名，出签名的 `.app` | `app/release/<工程名>-release-signed.app` |
+| `buildBin` | 只构建 `.bin` | `bin/entry-release-unsigned.bin` |
+| `buildApp` | 构建到 `.app`，顺带把两种 hap 和 `.bin` 都出了 | `app/<工程名>-release-unsigned.app` + `pack.info`<br>`hap/entry-bin-release-lite-unsigned.hap`<br>`hap/entry-release-lite-unsigned.hap`<br>`bin/entry-release-unsigned.bin` |
+| `buildSignedHap` | 构建 + 签名，出可以装表的 hap | `hap/entry-bin-release-lite-signed.hap` |
+| `buildSignedApp` | 构建 + 签名，出签名的 `.app` | `app/<工程名>-release-signed.app` |
 
 `buildSignedHap` / `buildSignedApp` **必须给 `--p7b`**，不给直接报错 —— 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
+`buildBin` / `buildApp` 给了 `--p7b` 也会顺带签名，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
 
-**没有单独的签名命令，也没有 `buildHap`。** 未签名的 hap 是 `buildSignedHap` 的中间产物（`entry-bin-release-lite-unsigned.hap`），照样留在 work 目录里；`.bin` 同理，`.app` 走 `buildApp`。
+**没有单独的签名命令，也没有 `buildHap`。** 未签名的 hap 和 `.bin` 都是中间产物，照样留在 work 目录里。
 
-`hmlwsdk <命令>` 背后仍然是 `src/registerTasks.js` 那张任务表，命令只是入口别名：
+### 构建步骤
+
+没有任务系统、没有依赖图 —— `src/build.js` 就是一条顺序函数，命令只是它的 `target` 别名：
 
 ```
-buildBin       → generateReleaseJsBin
-buildApp       → packageReleaseApp
-buildSignedHap → signReleaseHap
-buildSignedApp → signReleaseApp
+buildBin       → bin
+buildApp       → app
+buildSignedHap → signedHap
+buildSignedApp → signedApp
 ```
 
-### 任务清单
-
-执行顺序只看 `src/registerTasks.js` 的 `DEPENDS` 表。命令行不再接受任务名，但调试时用 `--plan` 能看到某条命令会跑哪些：
-
-| 任务 | 做什么 | 产出（相对 work） |
+| 步骤 | 做什么 | 产出（相对 work） |
 |---|---|---|
-| `mergeReleaseResources` | 合并资源 | `merge_res/release/merge_res_file.index` |
-| `mergeReleaseProfile` | 合并 config | `merge_profile/release/config.json` |
-| `generateReleaseJsManifest` | 生成 webpack 用的组件清单 | `js/release/jsManifest/<组件>/manifest.json` |
-| `compileReleaseJsWithNode` | node + webpack 编译 JS | `js/release/source/lite/assets/js/<组件>/*.js` `*.bc` |
-| `processReleaseProfile` | 加工 config | `process_profile/release/normal/config.json` |
-| `compileReleaseResources` | 编译资源 | `res/release/normal/lite/` `resources.index` `R.txt` `resources/` |
-| `generateReleaseBinSource` | 组装 `.bin` 原料目录 | `js/release/source/lite/` 整个目录 + `config.json` |
-| `processReleaseJavaRes` | 处理 Java 资源 | `jarRes/release/`（liteWearable 工程是空目录） |
-| `processReleaseLibsFile` | 处理 `.so` | `libs/release/`（liteWearable 工程是空目录） |
-| `generateReleaseJsBin` | 打成 `.bin` 私有容器 | `bin/release/entry-release-unsigned.bin` |
-| `signReleaseJsBin` | 签 `.bin` | `bin/release/entry-release-signed.bin` |
-| `packageReleaseHap` | 打 hap（两种形态） | `hap/release/entry-bin-release-lite-unsigned.hap`<br>`hap/release/entry-release-lite-unsigned.hap` |
-| `signReleaseHap` | 签 hap 里那个 `.bin` | `hap/release/entry-bin-release-lite-signed.hap` |
-| `validateReleaseDistroFilterTask` | 校验 `distroFilter` | 无产物，纯校验 |
-| `packageReleaseApp` | 打 `.app` | `app/release/<工程名>-release-unsigned.app` + `pack.info` + `appInfo.json` |
-| `signReleaseApp` | 签 `.app` | `app/release/<工程名>-release-signed.app` |
+| `read project` | 读 build.gradle 的版本号 + 源码 config.json | 无 |
+| `merge config` | 注入 apiVersion、abilities 默认值 | 无（传对象，不落盘） |
+| `compile resources` | 编译资源（JS 实现，原 restool 的活） | `source/assets/entry/resources.index` + `resources/`<br>`R.txt` |
+| `compile js` | node + webpack 编译，再出 `.bc` | `source/assets/js/<组件>/*.js` `*.bc`<br>`manifest/<组件>/manifest.json` |
+| `assemble assets` | 回填资源 id、定型 config、删多余文件 | `source/config.json` |
+| `write bin` | 打成 `.bin` 私有容器 | `bin/entry-release-unsigned.bin` |
+| `sign bin` | 签 `.bin`（有 `--p7b` 才跑） | `bin/entry-release-signed.bin` |
+| `pack bin hap` | `.bin` 装进 hap —— **设备直接装的就是这种** | `hap/entry-bin-release-lite-unsigned.hap` |
+| `pack tree hap` | 文件树形态的 hap，只进 `.app` | `hap/entry-release-lite-unsigned.hap` |
+| `pack app` | 打 `.app` | `app/<工程名>-release-unsigned.app` + `pack.info` |
+| `sign app` | 签 `.app`（有 `--p7b` 才跑） | `app/<工程名>-release-signed.app` |
+
+中间态一律用变量传，不落盘：资源直接编译进 `source/assets/entry`（没有独立的资源输出目录再拷一遍），
+`.bin` 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。必须落盘的只有三类 ——
+webpack 的输入 manifest、webpack 的输出目录、最终产物；前两个是因为 webpack 是独立进程，只能靠文件系统交接。
 
 ### 选项
 
 | 选项 | 说明 |
 |---|---|
 | `--work <目录>` | 中间产物目录，默认 `<工程目录>/build/hmlwsdk` |
-| `--plan` | 只列要跑哪些任务，不执行。只需要命令名，不需要工程目录 |
 | `--p7b <文件>` | HarmonyOS profile。`buildSignedHap` / `buildSignedApp` 必给；`buildBin` / `buildApp` 给了才签 |
 | `--p12 <文件>` | PKCS#12 私钥库，配合 `--p12pwd` |
 | `--p12pwd <密码>` | p12 密码 |
@@ -262,7 +254,7 @@ hmlwsdk buildApp apps/devdemo/devdemo --work /tmp/hmlw-build
           …
 ```
 
-组件目录下**不需要**放 `manifest.json` —— 那是 `generateReleaseJsManifest` 按 `config.json` 生成的，会被传给 webpack 当 `aceManifestPath`。
+组件目录下**不需要**放 `manifest.json` —— 那是 `compile js` 按 `config.json` 拼出来传给 webpack 当 `aceManifestPath` 的。
 
 CLI 启动时会检查 `entry/src/main/config.json` 存在，不存在直接报错退出。
 
@@ -300,13 +292,13 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 
 | 产物 | 路径（相对 work） | 说明 |
 |---|---|---|
-| `.bin`（未签名） | `bin/release/entry-release-unsigned.bin` | 私有容器，设备真正验签的对象 |
-| `.bin`（签名） | `bin/release/entry-release-signed.bin` | 有 `--p7b` 时才有 |
-| hap（`.bin` 形态） | `hap/release/entry-bin-release-lite-unsigned.hap` | 单条目，只有那个 `.bin`，stored 不压缩 |
-| hap（`.bin` 形态，已签名） | `hap/release/entry-bin-release-lite-signed.hap` | `buildSignedHap` 的产物：里面那个 `.bin` 已签名，**不带 zip 签名块**。Gradle 的同名产物会多插一个 `HAP Sig Block 42`（实测差 6585 B），本 SDK 不插，理由见[签名](#签名) |
-| hap（文件树形态） | `hap/release/entry-release-lite-unsigned.hap` | 所有源文件打平成一个 zip（devdemo 实测 92 个条目），全部 stored，无目录条目 |
-| `.app`（未签名） | `app/release/<工程名>-release-unsigned.app` | 装一份文件树形态 hap + `pack.info`，deflate 压缩 |
-| `.app`（签名） | `app/release/<工程名>-release-signed.app` | 有 `--p7b` 时才有 |
+| `.bin`（未签名） | `bin/entry-release-unsigned.bin` | 私有容器，设备真正验签的对象 |
+| `.bin`（签名） | `bin/entry-release-signed.bin` | 有 `--p7b` 时才有 |
+| hap（`.bin` 形态） | `hap/entry-bin-release-lite-unsigned.hap` | 单条目，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
+| hap（`.bin` 形态，已签名） | `hap/entry-bin-release-lite-signed.hap` | `buildSignedHap` 的产物：里面那个 `.bin` 已签名，**不带 zip 签名块**。Gradle 的同名产物会多插一个 `HAP Sig Block 42`（实测差 6585 B），本 SDK 不插，理由见[签名](#签名) |
+| hap（文件树形态） | `hap/entry-release-lite-unsigned.hap` | 所有源文件打平成一个 zip（devdemo 实测 92 个条目），全部 stored，无目录条目。只进 `.app` |
+| `.app`（未签名） | `app/<工程名>-release-unsigned.app` | 装一份文件树形态 hap + `pack.info`，deflate 压缩 |
+| `.app`（签名） | `app/<工程名>-release-signed.app` | 有 `--p7b` 时才有 |
 
 注意两点：
 
@@ -325,7 +317,7 @@ assets/js/default/common/*.bin|*.png
 assets/js/default/pages/ 下每个页面各一个 .js 和一个 .bc
 ```
 
-其中 `.png` 和 `.bin` 并存的那些 `.bin` **不是资源编译的产物** —— 是 ace-loader 的 `lib/lite/lite-image2bin.js` 在 webpack 阶段顺手做的图片转换（`webpack.lite.config.js` 第 185 行）。它同时写 `xxx.bin` 和 `xxx.png.bin` 两份，`generateReleaseBinSource` 负责把双后缀那份删掉 —— Gradle 的产物里一个 `.png.bin` 都没有。
+其中 `.png` 和 `.bin` 并存的那些 `.bin` **不是资源编译的产物** —— 是 ace-loader 的 `lib/lite/lite-image2bin.js` 在 webpack 阶段顺手做的图片转换（`webpack.lite.config.js` 第 185 行）。它同时写 `xxx.bin` 和 `xxx.png.bin` 两份，`assembleAssets` 负责把双后缀那份删掉 —— Gradle 的产物里一个 `.png.bin` 都没有。
 
 图片转 `.bin` 的格式（本 SDK 不负责转，但换 ace-loader 版本时要靠它判断）：
 
@@ -337,9 +329,25 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 
 ### work 目录怎么清
 
-任务之间靠 `taskContext.paths` 传递产物路径，没有增量缓存 —— 重复跑会覆盖。要干净重来就删掉 work 目录。
+没有增量缓存 —— 重复跑会覆盖，要干净重来就删掉 work 目录。完整布局：
 
-⚠ `generateReleaseBinSource` **不能**整体清空 `js/release/source/lite`：webpack 已经把 `assets/js/**` 写在那儿了，整体清空会把 81 个文件删掉（之前 `.bin` 里只剩 `config.json` 一个条目就是这个原因）。它只清 `assets/entry`。
+```
+work/
+  R.txt                       资源 id 表（只用来回填 config，不进包）
+  manifest/<组件>/manifest.json   webpack 的输入
+  cache/                      webpack 缓存
+  source/
+    config.json               最终打进包的 config
+    assets/entry/             资源编译的产物（+ img2bin 补的 icon.bin）
+    assets/js/<组件>/          webpack 的产物
+  bin/                        *.bin
+  hap/                        *.hap
+  app/                        *.app + pack.info
+```
+
+⚠ `assembleAssets` **不能**整体清空 `source/`：webpack 已经把 `assets/js/**` 写在那儿了，整体清空会把 81 个文件删掉（之前 `.bin` 里只剩 `config.json` 一个条目就是这个原因）。它只清根下多余的东西和双后缀 `.png.bin`。
+
+⚠ 反过来，`compile resources` 那一步**要**先清 `source/assets/entry` —— 工程里删掉的资源不会自己消失，留下的旧文件会被打进 `.bin`。
 
 ---
 
@@ -347,48 +355,33 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 
 ### 唯一顺序来源
 
-执行顺序只看 `src/registerTasks.js` 里的 `DEPENDS` 表。构建是**按需**的：跑某个入口只跑它依赖的任务，不是把 16 个从头扫一遍。所以 `packageReleaseApp` 不会带出资源编译那条链，跟 Gradle 的行为一致。
+`src/build.js`。没有任务表、没有依赖图、没有跨步骤的 context 对象 —— 那些在 Gradle 里是为了声明式地拼装 117 个 task 才需要的，这里整条链 6~10 步，顺序写出来一眼能看完。
 
-编号只是登记顺序，箭头才是依赖 —— `buildBin` 只会执行 1~8 那几条，`buildSignedApp` 会执行全部 15 个（第 13 步 `signReleaseHap` 不在它的链上）：
+形状是这样（资源和 JS 两支并行，在组装处汇合）：
 
 ```
-1   mergeReleaseResources
-2   mergeReleaseProfile              ← 1
-3   generateReleaseJsManifest        ← 2
-4   compileReleaseJsWithNode         ← 3      ┐
-5   processReleaseProfile            ← 2      │
-6   compileReleaseResources          ← 5      │
-7   generateReleaseBinSource         ← 4, 6   │ hap 链
-8   processReleaseJavaRes            ← 无     │
-9   processReleaseLibsFile           ← 无     │
-10  generateReleaseJsBin             ← 7      │
-11  signReleaseJsBin                 ← 10     │
-12  packageReleaseHap                ← 4, 6, 7, 8, 9, 11 ┘
-13  signReleaseHap                   ← 12     ← buildSignedHap 到这儿
-14  validateReleaseDistroFilterTask  ← 无     ┐
-15  packageReleaseApp                ← 14, 12 │ app 链
-16  signReleaseApp                   ← 15     ┘
+读工程 → 加工 config ┬─ 编译资源 ─┬─ 定型 source/ → 写 .bin ─┬─ 签 .bin ─┐
+                     └─ 编译 JS ──┘                         │          ├→ 打 hap（.bin 形态）
+                                                            └→ 打 hap（文件树）→ 打 .app → 签 .app
 ```
 
-`packageReleaseHap` 的依赖列了 6 个，其中几个是冗余的（`generateReleaseBinSource` 和 `compileReleaseResources` 已经通过 `signReleaseJsBin → generateReleaseJsBin → …` 覆盖），原样保留，拓扑排序会自己去重。
+`target` 决定停在哪个产物上。表里「有 `--p7b` 才跑」的那两步，对应 Gradle 没配 `signingConfig` 就出 unsigned 的行为。
 
 ### 每步做的具体事
 
 | 步骤 | 关键点 |
 |---|---|
-| `mergeReleaseResources` | 生成资源目录清单。**不复制资源**，只把 `src/main` 的绝对路径按 `"路径" + CRLF` 写进索引。资源编译已经直接找 `resources/`、不读这份清单了，任务保留只为让 build 目录结构与 Gradle 对得上 |
-| `mergeReleaseProfile` | config 第一阶段：按 `build.gradle` 填 `app.apiVersion`、release **不写** `deviceConfig.default.debug`、`abilities` 里缺 `homeAbility` 的补 `false` |
-| `generateReleaseJsManifest` | 组件清单给 webpack 用。`appName` 保留 `$string:appName` 原样，由 webpack 侧解析资源引用 |
-| `compileReleaseJsWithNode` | `aceModuleRoot` 必须是**组件目录**（`src/main/js/<组件>`），传 `src/main` 会直接报 `missing app.js`。产物目录必须带 `assets/js/<组件名>` 这一层，否则 webpack 把 `app.js` 写在根下，与 Gradle 结构差 83 个条目 |
-| `processReleaseProfile` | config 第二阶段。Gradle 这步实测只调键顺序、不增删字段，所以实现就是一个 clone。函数独立保留，给将来按 SDK 版本做字段迁移（ARK 变体要追加 `module.distro.virtualMachine`）留位置 |
-| `compileReleaseResources` | 扫 `resources/` → 发 id → 写 `resources.index` / `R.txt` / 复制文件 / 压缩 PNG |
-| `generateReleaseBinSource` | 回填 `iconId` / `labelId`、`deviceType` 只写回 `liteWearable`、复制 `assets/entry`、删双后缀 `.png.bin` |
-| `generateReleaseJsBin` | `writeBin` 把目录序列化成 `.bin` |
-| `signReleaseJsBin` | 纯 JS 签名块，没配证书就把 unsigned 当 signed 传下去 |
-| `packageReleaseHap` | 两种形态都出 |
-| `signReleaseHap` | 拆开 `.bin` 形态的 hap，里面那个 `.bin` 已签就复用、没签就签，再装回去 |
-| `packageReleaseApp` | 只收文件树形态，`config.json` 和 `manifest.json` 换成紧凑单行版 |
-| `signReleaseApp` | 往 `.app` 的中央目录前插 `HAP Sig Block 42` |
+| `read project` | 从模块的 `build.gradle` 读 `compileSdkVersion` / `compatibleSdkVersion`，读不到直接报错，不猜默认值 |
+| `merge config` | 按 `build.gradle` 填 `app.apiVersion`、release **不写** `deviceConfig.default.debug`、`abilities` 里缺 `homeAbility` 的补 `false`。Gradle 的 `processProfile` 那一步实测只调键顺序，已合并到这里 |
+| `compile resources` | 直接编进 `source/assets/entry`。扫 `resources/` → 发 id → 写 `resources.index` / `R.txt` / 复制文件 / 压缩 PNG |
+| `compile js` | `aceModuleRoot` 必须是**组件目录**（`src/main/js/<组件>`），传 `src/main` 会直接报 `missing app.js`。产物目录必须带 `assets/js/<组件名>` 这一层，否则 webpack 把 `app.js` 写在根下，与 Gradle 结构差 83 个条目。每个组件自己拼一份 manifest，不落成独立的中间产物 |
+| `assemble assets` | 回填 `iconId` / `labelId`、`deviceType` 只写回 `liteWearable`、删双后缀 `.png.bin`。不搬文件 —— 资源编译和 webpack 都已经写在最终位置了 |
+| `write bin` | `writeBin` 把目录序列化成 `.bin`，Buffer 留给下一步 |
+| `sign bin` | 纯 JS 签名块。没配证书时跳过 |
+| `pack bin hap` | 把 `.bin` 塞进 zip。直接拿 Buffer 打，不拆开再装回去 |
+| `pack tree hap` | 只收文件树形态，`config.json` 和 `manifest.json` 换成紧凑单行版 |
+| `pack app` | 文件树形态的 hap + `pack.info` 装进一个 zip，deflate 压缩 |
+| `sign app` | 往 `.app` 的中央目录前插 `HAP Sig Block 42` |
 
 ### release 变体的差异
 
@@ -421,7 +414,7 @@ offset 8   width*height*4 字节，裸 BGRA 像素，无压缩
 
 ### hap 层签的是什么
 
-设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：拿到 `.bin` 形态的 hap，把里面那个 `.bin` 签好（构建链上 `signReleaseJsBin` 已经签过，直接复用），再装回去 —— 产物 `entry-bin-release-lite-signed.hap`，里面那份 `.bin` 与 `bin/release/entry-release-signed.bin` 逐字节相同。
+设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：先签 `.bin`（`sign bin`），再把它装进 hap —— 产物 `entry-bin-release-lite-signed.hap`，里面那份 `.bin` 与 `bin/entry-release-signed.bin` 逐字节相同。早先的实现是「打成 hap → 拆开读出 `.bin` → 判断已签 → 装回去」，那个拆包一步已经删掉了。
 
 Gradle 的 `signReleaseHap` 在同样的事情之外，还会往 hap 这个 zip 的中央目录前再插一个 `HAP Sig Block 42`（格式已经逆出来了，就在 `signZip.js` 里，`.app` 用的同一套）。实测 `apps/_3rd/随机事件` 的一对 debug 产物：
 
@@ -454,8 +447,9 @@ entry-bin-debug-lite-signed.hap     6913411 B   同一个 .bin，字节完全相
 | 模块 | 验证方式 | 结果 |
 |---|---|---|
 | `.bin` 读写 | 4 个真实 `.bin` 解析后重建，比对 SHA256 | 字节级一致 |
+| `.bin` 条目排序 | `_empty` 15 个、`devdemo` 92 个条目对比 Gradle 产物 | 顺序完全一致（按路径深度 + 字节序） |
 | hap 打包/解包 | 单 `.bin` 形态与文件树形态往返 | 内容一致 |
-| config 加工 | 源码 → merge → process → 回填资源号，逐阶段对比 | 三阶段内容一致 |
+| config 加工 | 源码 → 加工 → 回填资源号，逐阶段对比 | 三阶段内容一致 |
 | 资源编译 | 与 restool 1.022 的产物逐文件比对 | `R.txt` / `resources.index` 字节一致；png 像素一致（压缩字节差几 B） |
 | `.bc` 生成 | devdemo 22 个 bundle 分别喂 wasm 和 SDK 的 `jerry-snapshot.exe`（debug、release 各一轮） | 22/22 逐字节一致 |
 | `.bin` 签名 | 与 Gradle 产物逐段对比 | `proBlock` / `signBlock` / econtent 头完全一致 |
@@ -467,7 +461,7 @@ entry-bin-debug-lite-signed.hap     6913411 B   同一个 .bin，字节完全相
 
 - **`.bin`** — `_empty`(15 条目 / 110958 B)、`atri-mdm`(903 / 10786572 B)、`腕上词典 6.4.0`(201 / 9662763 B)、`openCrab`(112 / 8893516 B)，重建 SHA256 全部相同
 - **hap** — `_empty` 单 `.bin` 形态；`devdemo` 文件树形态 92 条目；`stock` 单 `.bin` 2505 KB
-- **config** — `_empty` 源码 690 B → merge 1064 B → process 1064 B → 最终 1137 B。JSON 内容三阶段全对，键顺序与 Gradle 不同属正常（Gradle 用 Java HashMap，顺序无语义）
+- **config** — `_empty` 源码 690 B → 加工后 1016 B（release，不写 `deviceConfig.default.debug`）→ 最终 1089 B（多了 `iconId` / `labelId`）。JSON 内容全对，键顺序与 Gradle 不同属正常（Gradle 用 Java HashMap，顺序无语义）
 - **资源编译** — `_empty` / `devdemo` / 自造 probe（全套 element 类型）的 `resources.index` 与 `R.txt` 字节一致；png 像素一致、压缩字节差几 B
 - **`.bc`** — 22 个文件 397 ms，平均 18 ms/个，比每次 exec 起进程还快
 
@@ -487,7 +481,6 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 
 ### 未验证
 
-- **`.bin` 条目排序规则**。参考 `hap-sign-utils` 的 `hapToBin` 用的是「按路径深度 + 字典序」，这里照此实现，但没拿真实产物逐条核对过顺序。
 - **图片缩放规则**。`icon.bin` 的宽高直接来自源 png，未验证遇到非目标尺寸时 Gradle 怎么处理。别假设是简单拉伸。
 
 ### 不支持
@@ -517,8 +510,7 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 | `src/ace-loader 缺构建工具 …` | submodule 没拉或没装依赖。`git submodule update --init`，再 `cd src/ace-loader && npm install` |
 | `<…> 下没有 app.js，确认组件名 default 对不对` | `config.json` 的 `module.js[].name` 与 `src/main/js/` 下的目录名不一致 |
 | `找不到 <…>/build.gradle，没法确定 compileSdkVersion` | 模块目录没有 `build.gradle`，或里面少了这两个键 |
-| `[TODO] <任务名> 还没实现 —— <缺什么>` | 前置任务没跑。报错信息里写清了缺什么，照着补前置即可（或直接换成更上层的入口任务） |
-| `<任务> 失败：组件 default（webpack 返回 N）` | webpack 报错。异常里附了最后 2000 字符的 stdout / stderr，往前翻能看到具体哪个文件 |
+| `compile js: webpack failed for component default (exit N)` | webpack 报错。异常里附了最后 2000 字符的 stdout / stderr，往前翻能看到具体哪个文件 |
 | `Json tag symbol is invalid` | 用了 `symbol` 资源。api6 的 restool 也不支持 |
 | `ParseJsonNodeByType unsupport ResType15` | 用了 `id` 资源。要走 `base/element/id_defined.json` |
 | `签名至少要给 p7b 路径（--p7b）` | 给了 `--p12` / `--key` 但没给 `--p7b` |
@@ -528,23 +520,41 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 
 产物不对的两种情况：
 
-- **`.bin` 里只有 `config.json` 一个条目** —— `js/release/source/lite` 被整体清空过（早期 bug）。删掉 work 目录重跑
-- **产物里多出 `.png.bin` / `image_convert_result.txt` / `assets/js/cache/*.pack.gz`** —— 这些 Gradle 的产物里都没有。前者说明 `generateReleaseBinSource` 的清理没跑到，后两者说明 webpack 的缓存目录落在了产物目录里（应该由 `cacheDir` 指到 `js/release/cache`）
+- **`.bin` 里只有 `config.json` 一个条目** —— `source/` 被整体清空过（早期 bug）。删掉 work 目录重跑
+- **产物里多出 `.png.bin` / `image_convert_result.txt` / `source/assets/js/cache/*.pack.gz`** —— 这些 Gradle 的产物里都没有。前者说明 `assembleAssets` 的清理没跑到，后两者说明 webpack 的缓存目录落在了产物目录里（应该由 `cacheDir` 指到 `work/cache`）
 
 ---
 
 ## 作为库使用
 
-`src/index.js` 是包的统一出口（`package.json` 的 `main`），可以只取单个模块用：
+整条链一个函数：
+
+```js
+import { build } from "hmlwsdk";
+
+const outputs = await build({
+  projectDir: "apps/devdemo/devdemo",
+  target: "signedApp",          // bin | signedHap | app | signedApp
+  signingConfig: { p7b: "my.p7b", keyFile: "private-pkcs8.pem" },
+  log: console.log              // 可选，每步一行进度；默认 console.log
+});
+console.log(outputs.signedApp, outputs.bin, outputs.signedBin);
+```
+
+不给 `signingConfig` 就出 unsigned 产物（`signedHap` / `signedApp` 两个 target 除外，它们会直接报错）。
+
+也可以只取单个模块用：
 
 ```js
 import {
   readBin, writeBin, isSignedBin, stripSignature, SIGN_HEAD_ASCII,
-  packHap, readZip, writeZip, crc32,
-  mergeProfile, processProfile, stringifyConfig,
+  readZip, writeZip, crc32, collectFiles,
+  packBinHap, packTreeHap, packApp, signApp,
+  mergeProfile, stringifyConfig, stringifyConfigMinified,
   parseRTable, fillResourceIds,
   compileResources, compressPng, isSupportedPng,
-  compileJs,
+  runWebpack, compileJs,
+  readProject,
   prepareSigning, signBin, signZip, parseP7b, loadPrivateKey, slicedSha256,
   resolveTools, resolveNode
 } from "hmlwsdk";
@@ -552,33 +562,21 @@ import {
 
 | 函数 | 用途 |
 |---|---|
+| `build({projectDir, target, ...})` | 整条链，返回各产物路径 |
+| `readProject(projectDir)` | 读 build.gradle 版本号 + 源码 config.json |
 | `readBin(buf)` / `writeBin({bundleName, entries})` | `.bin` 私有容器读写 |
 | `stripSignature(buf)` / `isSignedBin(buf)` | 剥签名块 / 判断是否已签 |
-| `packHap(binBuf, name)` | 把 `.bin` 装进 hap |
+| `collectFiles(dir)` | 递归扫目录成条目列表（按路径深度 + 字节序） |
+| `packBinHap(binBuf, name)` / `packTreeHap(sourceRoot, config)` | 两种形态的 hap |
+| `packApp({outDir, hapBuf, hapName, config})` / `signApp({appBuf, signingConfig})` | `.app` 打包与签名，都只处理 Buffer |
 | `readZip` / `writeZip` / `crc32` | 手写 zip 读写（已字节级验证） |
-| `mergeProfile` / `processProfile` / `stringifyConfig` | config 加工（前两个）与序列化 |
-| `compileResources({moduleRoot, configPath, outDir, compressImage})` | 资源编译总入口 |
+| `mergeProfile` / `stringifyConfig` | config 加工与序列化 |
+| `compileResources({moduleRoot, outDir, rTxtPath, compressImage})` | 资源编译总入口 |
 | `compressPng(buf)` | PNG 重编码（原 restool 的 `-z`） |
-| `compileJs({moduleRoot, buildDir, manifestPath, buildMode})` | 调 node + webpack |
+| `compileJs({moduleDir, config, work, sourceRoot, iconDir})` | 编译 JS：每组件写 manifest → webpack → `.bc` |
+| `runWebpack({moduleRoot, buildDir, manifestPath, ...})` | 只跑一次 webpack，不管 manifest 和 `.bc` |
 | `prepareSigning(cfg)` / `signBin` / `signZip` | 签名 |
 | `resolveTools()` / `resolveNode()` | 定位 `src/ace-loader` 和 node |
-
-也可以只用 CLI 入口里的 `runBuild`：
-
-```js
-import { runBuild, plan } from "./src/runBuild.js";
-import { createTaskContext } from "./src/createTaskContext.js";
-
-const ctx = createTaskContext({
-  projectDir, moduleDir, work, srcConfig,
-  compileSdkVersion, compatibleSdkVersion
-});
-const r = await runBuild(ctx, "signReleaseHap");
-```
-
-`runBuild` 的第三个参数是进度回调，默认 `console.log`。任务函数允许返回 Promise（`compileReleaseJsWithNode` 要 await wasm 生成 `.bc`），内部统一 await。
-
-第二个参数是**内部任务名**（`generateReleaseJsBin` / `signReleaseHap` …），不是 CLI 的四条命令名 —— 命令行那四个只是入口别名，映射表在 `bin/hmlwsdk.js` 的 `COMMANDS` 里。
 
 ---
 
@@ -590,35 +588,36 @@ bin/hmlwsdk.cmd         Windows 的 cmd / PowerShell 入口（Windows 不认 she
 bin/hmlwsdk             macOS / Linux 的 sh 入口
 src/
   index.js              包的统一导出
-  runBuild.js           按依赖图跑任务：拓扑排序，只跑目标任务的依赖
-  registerTasks.js      16 个任务的登记表 + DEPENDS 依赖图 ← 查执行顺序看这里
-  createTaskContext.js  造任务间传的上下文对象 + todo()
+  build.js              整条链 ← 查执行顺序看这里
+  readProject.js        读 build.gradle 版本号 + 源码 config.json
   findTools.js          定位 src/ace-loader，以及用哪个 node
-  parseBuildGradle.js   读 compileSdkVersion / compatibleSdkVersion
 
-  ── 16 个流程步骤，一文件一步，文件名 = Gradle 任务名 ──
-  mergeReleaseResources.js / mergeReleaseProfile.js / generateReleaseJsManifest.js
-  compileReleaseJsWithNode.js / processReleaseProfile.js / compileReleaseResources.js
-  generateReleaseBinSource.js / processReleaseJavaRes.js / processReleaseLibsFile.js
-  generateReleaseJsBin.js / signReleaseJsBin.js / packageReleaseHap.js
-  signReleaseHap.js / validateReleaseDistroFilterTask.js / packageReleaseApp.js
-  signReleaseApp.js
+  ── 配置 ──
+  processConfig.js      mergeProfile / stringifyConfig / stringifyConfigMinified
+  parseResourceTable.js R.txt 解析、config 里资源号回填
 
-  ── 上面这些步骤调用的实现 ──
-  processConfig.js      mergeProfile / processProfile / stringifyConfig
-  compileResources.js   资源编译总入口
-  scanResourceFiles.js  扫 resources/ 目录，解析限定目录名（base / dark / zh_CN …）
+  ── 资源 ──
+  compileResources.js   资源编译总入口（扫目录 → 发 id → 写 index / R.txt / 复制文件）
+  scanResourceFiles.js  扫 resources/，解析限定目录名（base / dark / zh_CN …）
   parseElementJson.js   element 下的 JSON → 记录数据段（全套类型）
   writeResourceIndex.js 写 resources.index（restool 私有格式）
   writeResourceTable.js 写 R.txt
   copyResourceFiles.js  复制 media / profile / rawfile，写 4 个空 .key
   compressPng.js        PNG 重编码，复现 restool 的 -z（用 node:zlib，像素一致）
-  parseResourceTable.js R.txt 解析、config 里资源号回填
-  runWebpack.js         调 node + webpack 编译 JS
-  generateJsSnapshot.js webpack 之后把 .js 编成 .bc（进程内跑 wasm）
+
+  ── JS ──
+  compileJs.js          每组件写 manifest → webpack → 清中间文件 → 出 .bc
+  runWebpack.js         只跑一次 node + webpack
+  generateJsSnapshot.js .js 编成 .bc（进程内跑 wasm）
+
+  ── 组装与打包 ──
+  assembleAssets.js     定型 source/：回填资源 id、写 config、删双后缀 .png.bin
+  collectFiles.js       递归扫目录成条目列表（按路径深度 + 字节序）
+  packHap.js            两种形态的 hap（单 .bin / 文件树）
+  packApp.js            .app 打包
+  signApp.js            .app 签名
   readWriteZip.js       zip 读写 + crc32
   readWriteBin.js       .bin 私有容器：读 / 写 / 签名块剥离
-  packHap.js            把 .bin 装进 hap（stored，不压缩）
 
   sign/                 签名，8 个文件
   ace-loader/           git submodule，JS 构建链（webpack + sharp）
@@ -628,7 +627,7 @@ src/
 ### 三条命名规矩
 
 - **全部平铺在 `src/` 下，不建目录**。只有三个例外：`sign/`、`ace-loader/`（submodule，本来就是一整棵目录）、`jerry-parser-wasm/`（wasm 产物 + 60 行封装）。
-- **文件名一律「动词 + 名词」**，不许用缩写、不许加角色后缀。任务文件用 Gradle 任务名；实现文件用「动作 + 对象」，例如 `processConfig.js` 是「加工配置」。这条是踩过三次坑换来的（`ctx.js`、`rtable.js` 这种只有写的人懂的缩写，后来又变成 `-Transform` / `-Runner` / `-file` 三套后缀混用）。
+- **文件名一律「动词 + 名词」**，不许用缩写、不许加角色后缀，也不带变体词（`debug` 不做，`release` 是唯一变体，写进名字只是噪音）。`processConfig.js` 是「加工配置」、`collectFiles.js` 是「收集文件」、`build.js` 是「构建」。这条是踩过三次坑换来的（`ctx.js`、`rtable.js` 这种只有写的人懂的缩写，后来又变成 `-Transform` / `-Runner` / `-file` 三套后缀混用）。
 - **`bin/` 和 `src/readWriteBin.js` 不是一回事**。`bin/` 是可执行入口目录（npm 惯例），`readWriteBin.js` 管 `.bin` 私有容器。
 
 ---
@@ -643,13 +642,12 @@ src/
 
 已经手写并验证过的（`readWriteZip.js`、`readWriteBin.js`、`writeResourceIndex.js`）**保持不动** —— 它们有对照基准是字节级 SHA256，换库就得重新对一遍，风险大于收益。`compressPng.js` 是例外：它的验收标准是像素一致，底层换成 `node:zlib` 没问题，但里面那些 libpng 的细节（按代价函数挑每行 filter、IDAT 按 8192 硬切）必须原样保留，改了压缩效果会退步。
 
-### 加新任务的步骤
+### 加新步骤的步骤
 
-1. 在 `src/` 下建 `<任务名>.js`，导出 `name` / `produces` / `run(taskContext)`
-2. 在 `src/registerTasks.js` 的 `TASKS` 数组和 `DEPENDS` 表里登记
-3. 想让它能直接从命令行跑，就在 `bin/hmlwsdk.js` 的 `COMMANDS` 里加一条别名
-4. `hmlwsdk --plan <命令名>`（或 `plan("<任务名>")`）确认拓扑顺序对
-5. 拿真实工程跑一遍，把产物字节数写进注释
+1. 想清楚它插在 `src/build.js` 的哪两行之间 —— 没有依赖图，顺序就是代码顺序
+2. 有实质逻辑就在 `src/` 下建 `<动词+名词>.js`；只有几行胶水就直接写在 `build.js` 里（`write bin`、`pack bin hap` 都是这么处理的）
+3. 想让它能从命令行停在那个产物上，就在 `build.js` 的 `TARGETS` 里加一项、在 `bin/hmlwsdk.js` 的 `COMMANDS` 里加一条别名
+4. 拿真实工程跑一遍，把产物字节数写进注释
 
 ### 重新验证 `.bc` 生成
 
@@ -672,7 +670,7 @@ SHA256 应为 `259A75D5972482CE712AE1696DB0E4B9D8B3A0C6334C524B811999BC3F0AB5EB`
 仓库根目录的 `AGENTS.md` 和 `doc/gradle-build-report.html` 是**本地文档，不进 git**（`.gitignore` 里排除了）。它们记着：
 
 - `AGENTS.md` —— 每个模块的完整格式档案、踩过的坑、验证样本清单。改格式相关逻辑前必读
-- `doc/gradle-build-report.html` —— 72 张任务卡片的完整 Gradle 构建图，`DEPENDS` 表就是从它的 `kids` 字段抄来的
+- `doc/gradle-build-report.html` —— 72 张任务卡片的完整 Gradle 构建图。`src/build.js` 的步骤划分和每步的关键点都是从这张图里反推出来的
 
 ### 参考项目
 
