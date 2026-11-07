@@ -3,6 +3,7 @@ import path from "path";
 import { pathToFileURL } from "url";
 
 import { loadPrivateKey } from "./sign/loadPrivateKey.js";
+import { renderTemplate } from "./renderTemplate.js";
 
 /**
  * 读项目内的签名材料 —— cert/ 目录就是签名配置
@@ -194,19 +195,14 @@ function sameFields(a, b) {
  *
  * 这个文件被 cert/.gitignore 忽略（含明文密码），所以直接写成可被 import() 读的
  * ESM —— 工程根 package.json 的 "type": "module" 由 init 保证。
+ *
+ * 文件头部注释在 templates/projectInit/signing.config.js 里，这里只填字段 ——
+ * 字段是运行时扫出来的（p7b / p12 / keyFile / password…），没法写在模板里。
  */
 function writeSigningConfig(configPath, config) {
   const body = Object.entries(config)
     .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
     .join(",\n");
 
-  fs.writeFileSync(
-    configPath,
-    `/**\n` +
-      ` * Generated/updated by hmlwsdk — written back once signing material was found in cert/, so nothing has to be guessed next time.\n` +
-      ` * This file holds a plaintext password; cert/.gitignore ignores the whole directory, so it never reaches version control.\n` +
-      ` * Paths are relative to the cert/ directory.\n` +
-      ` */\n` +
-      `export default {\n${body}\n};\n`
-  );
+  fs.writeFileSync(configPath, renderTemplate("projectInit/signing.config.js", { body }));
 }

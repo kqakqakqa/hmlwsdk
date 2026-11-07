@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 
 import { DEFAULT_SDK_DIR, buildConfigTemplate, initProject } from "./initProject.js";
+import { TEMPLATE_DIR } from "./renderTemplate.js";
 
 /**
  * hmlwsdk create —— 从内置模板造一个全新的 liteWearable 工程
@@ -24,8 +24,8 @@ import { DEFAULT_SDK_DIR, buildConfigTemplate, initProject } from "./initProject
  * build.config.js 先在这里写好，因为 initProject 要求它必须存在。
  */
 
-/** 模板在 SDK 根下，与 bin/ src/ doc/ 平级；模板是数据不是代码，不塞进 src/ */
-export const TEMPLATE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "templates");
+/** 模板在 SDK 根下，与 bin/ src/ doc/ 平级；常量定义在 renderTemplate.js，渲染模板也要用它 */
+export { TEMPLATE_DIR };
 
 export const TEMPLATE_NAME = "liteWearableEmpty";
 

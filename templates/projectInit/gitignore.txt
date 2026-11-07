@@ -1,0 +1,4 @@
+# this directory belongs to hmlwsdk: it holds either private keys / plaintext passwords, or artifacts regenerated on every build.
+# the whole directory stays out of version control; only this .gitignore itself is kept.
+*
+!.gitignore
