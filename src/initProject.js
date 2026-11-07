@@ -18,10 +18,10 @@ import { renderTemplate } from "./renderTemplate.js";
  * 生成的东西（勾 = 进版本库）：
  *
  *   hmlwsdk.config.js     ✗  hmlwsdk 在哪 + 用哪个 node（本机相关，被 .gitignore 忽略）
- *   hmlwsdk.build.js      ✓  项目入口，npm run build 调它
+ *   hmlwsdk.build.js      ✓  项目入口，npm run build* 这四条 script 调它
  *   cert/.gitignore       ✓  忽略目录内一切（签名材料 + 含明文密码的 signing.config.js）
  *   build/.gitignore      ✓  忽略目录内一切（产物）
- *   package.json          ✓  补 "type": "module" 和 scripts
+ *   package.json          ✓  补 "type": "module" 和四条 scripts（名字与 CLI 命令一致）
  *   .gitignore            ✓  追加 /hmlwsdk.config.js
  *
  * 上面这四个文件的内容不写在这里 —— 它们是给用户读、让用户改的源码，
@@ -38,7 +38,32 @@ import { renderTemplate } from "./renderTemplate.js";
 
 export const DEFAULT_SDK_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * 工程 package.json 里的四条 script
+ *
+ * 名字与 bin/hmlwsdk.js 的 COMMANDS 完全一致 —— 用的人只记一套：
+ * `npm run buildSignedApp` 和 `hmlwsdk buildSignedApp` 跑的是同一条链。
+ * 早先叫 build / build:bin / build:hap / build:app，其中 build:app 指向的是
+ * signedApp（强制签名）、而 build 只是「有材料就签」，光看名字分不出来。
+ *
+ * 值只能是 `node hmlwsdk.build.js <target>`：SDK 不在 PATH 里也不是 npm 依赖，
+ * 能保证存在的只有工程内那个入口文件。
+ */
 const BUILDER_SCRIPTS = {
+  buildBin: "node hmlwsdk.build.js bin",
+  buildApp: "node hmlwsdk.build.js app",
+  buildSignedHap: "node hmlwsdk.build.js signedHap",
+  buildSignedApp: "node hmlwsdk.build.js signedApp"
+};
+
+/**
+ * 早先那四条 script 的名字和它们当时的默认值
+ *
+ * init 是幂等的、只补缺不覆盖，所以光改名的话老工程重跑会留下四条没人用的旧 script
+ * （其中 build:app 还指着 signedApp，跟新的 buildSignedApp 重复）。
+ * 只删「值仍是当初那个默认值」的 —— 那说明是 init 自己写的；用户改过的一律留着。
+ */
+const LEGACY_SCRIPTS = {
   build: "node hmlwsdk.build.js",
   "build:bin": "node hmlwsdk.build.js bin",
   "build:hap": "node hmlwsdk.build.js signedHap",
@@ -108,9 +133,11 @@ function updateOwnIgnore(root, updated) {
 }
 
 /**
- * 补 package.json 的 "type": "module" 和 scripts
+ * 补 package.json 的 "type": "module" 和四条 scripts
  *
- * 已有同名的 script 不覆盖 —— 用户可能已经把它接到自己的流程里了。
+ * script 名与 CLI 的 build* 命令同名，值见 BUILDER_SCRIPTS。
+ * 已有同名的 script 不覆盖 —— 用户可能已经把它接到自己的流程里了；
+ * 旧名字只在值仍是当初默认值时清掉，见 LEGACY_SCRIPTS。
  */
 function updatePackageJson(root, { created, skipped, updated }) {
   const file = path.join(root, "package.json");
@@ -128,6 +155,13 @@ function updatePackageJson(root, { created, skipped, updated }) {
   pkg.type = "module";
 
   pkg.scripts ??= {};
+
+  // 先清老名字再补新名字：反过来的话 build:app 还占着位置，新的 buildSignedApp
+  // 会一并加上去，两条 script 指着同一个 target。
+  for (const [name, cmd] of Object.entries(LEGACY_SCRIPTS)) {
+    if (pkg.scripts[name] === cmd) delete pkg.scripts[name];
+  }
+
   for (const [name, cmd] of Object.entries(BUILDER_SCRIPTS)) {
     pkg.scripts[name] ??= cmd;
   }

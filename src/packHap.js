@@ -22,6 +22,10 @@ import { collectFiles, entryPath } from "./collectFiles.js";
  *        条目名就是 source 下的相对路径
  *        但 config.json 是 1935 B 的**紧凑单行版**，不是 source 里那个 3422 B 的缩进版
  *
+ * 上面这些名字是 Gradle 的叫法（模块名 + 变体 + 设备形态）。本 SDK 自定义的部分只有
+ * 两处：`.bin` 形态 hap 里那个条目叫 `<bundleName>-<moduleName>[-signed].bin`，`.app`
+ * 里那份 hap 叫 `<bundleName>-<moduleName>.hap`。条目内容与下面描述的一致，没动。
+ *
  * 这两种 hap 谁会进 .app：PackageApp.getHapPathFiles() 会过滤掉「文件名含 -bin- 且
  * deviceType 含 liteWearable」的，所以 .bin 形态进不了 .app，只有文件树形态进得去。
  */
@@ -33,7 +37,7 @@ import { collectFiles, entryPath } from "./collectFiles.js";
  *   hap 是标准 zip，里面只放一个 .bin，且用 stored（不压缩）。
  *
  * @param {Buffer} binBuf       .bin 内容
- * @param {string} binFileName  放进 zip 里的文件名，例如 entry-debug-unsigned.bin
+ * @param {string} binFileName  放进 zip 里的文件名，例如 com.example.app-entry-signed.bin
  * @returns {Buffer} hap
  */
 export function packBinHap(binBuf, binFileName) {

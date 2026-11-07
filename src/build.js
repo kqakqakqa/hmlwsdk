@@ -32,10 +32,12 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *   app        出 .app                           （给了签名配置就顺带签）
  *   signedApp  出签名后的 .app
  *
- * 落盘的只有一份：<工程>/build/<bundleName>.<ext>，内容是哪个由 target 决定 ——
- *   build/<bundleName>.bin   target=bin
- *   build/<bundleName>.hap   target=signedHap
- *   build/<bundleName>.app   target=app / signedApp
+ * 落盘的只有一份：<工程>/build/<bundleName>-<moduleName>[-signed].<ext>，
+ * 内容是哪个由 target 决定 ——
+ *   ...bin   target=bin
+ *   ...hap   target=signedHap
+ *   ...app   target=app / signedApp
+ * 签过的才带 -signed，所以文件名本身就说明这个包能不能直接装表。
  * 中间产物（.bin、两种 hap、pack.info）全在内存里往后传，一行都不落盘。
  *
  * 必须落盘的只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
@@ -83,10 +85,14 @@ export async function build(opts) {
   const signingConfig =
     opts.signingConfig ?? (await step("read signing", () => readSigningConfig(project.root)));
 
+  // 说的是「凑不齐可用配置」而不是「没有材料」：模板自带 cert/default.p12，
+  // 常见情形是私钥已经在、只差 p7b，报「no signing material」会让人以为目录是空的。
   if (opts.target.startsWith("signed") && !signingConfig) {
     throw new Error(
-      `${opts.target} produces a signed artifact, but ${path.join(project.root, CERT_DIR)} has no signing material ` +
-        "(drop a .p7b plus a .p12 or PKCS#8 .pem in there; the password is tried against the p12 file name if unset)"
+      `${opts.target} produces a signed artifact, but ${path.join(project.root, CERT_DIR)} has no usable signing config — ` +
+        "it needs a .p7b profile plus a .p12 or PKCS#8 .pem key. " +
+        "A profile is issued per app by AppGallery Connect, it cannot be generated locally; " +
+        "the p12 password is tried against the file name when cert/signing.config.js does not set one"
     );
   }
 
@@ -103,7 +109,7 @@ export async function build(opts) {
   const rTxtPath = path.join(work, "R.txt");
   // pack.info 的落点（它同时被打进 .app，磁盘这份是 packApp 的副产物）
   const packDir = path.join(work, "pack");
-  // 唯一一份产物放这儿，命名用 bundleName —— 见文件末尾的 publish()
+  // 唯一一份产物放这儿，命名规则见下面的 artifactStem —— 见文件末尾的 publish()
   const outRoot = path.join(project.root, "build");
 
   // mergeProfile 之后的 config 只是中间态，不落盘 —— 真正要看的是
@@ -162,20 +168,27 @@ export async function build(opts) {
     writeBin({ bundleName: config.app.bundleName, entries: collectFiles(sourceRoot) })
   );
 
+  // ── 产物命名 ────────────────────────────────────────────────────────
+  // 轻量穿戴这套里只有 module 和 bundle 两个名字，产物名两者都带：
+  //   <bundleName>-<moduleName>[-signed].<ext>
+  // moduleName 取 config 里的 distro.moduleName（DevEco 生成的工程都有，值就是 entry）。
+  const moduleName = config.module?.distro?.moduleName ?? "entry";
+  const artifactStem = `${config.app.bundleName}-${moduleName}`;
+
   // cert/ 里没材料时不签，unsigned 直接当 signed 往下传
   let binForHap = unsignedBinBuf;
-  let binForHapName = "entry-release-unsigned.bin";
+  let binForHapName = `${artifactStem}.bin`;
   if (signingConfig) {
-    binForHapName = "entry-release-signed.bin";
+    binForHapName = `${artifactStem}-signed.bin`;
     binForHap = await step("sign bin", () => signBinBuffer(unsignedBinBuf, signingConfig));
   }
 
   // 收尾：把唯一一份产物放到 build/ 根、清掉 scratch、返回它的路径。
   // 四个 target 都从这里出去，所以「只落一份」这件事只有一个实现点。
   const done = (buf, ext) => {
-    const artifact = publish(buf, outRoot, config.app.bundleName, ext);
+    const artifact = publish(buf, outRoot, artifactStem, ext, Boolean(signingConfig));
     if (!signingConfig) {
-      log(`! no signing material in ${CERT_DIR}/, ${path.basename(artifact)} is unsigned and cannot be installed on a watch`);
+      log(`! no usable signing config in ${CERT_DIR}/, ${path.basename(artifact)} is unsigned and cannot be installed on a watch`);
     }
     cleanWork(work);
     return { target: opts.target, work, artifact };
@@ -199,10 +212,12 @@ export async function build(opts) {
   // 文件树形态：.bin 形态进不了 .app（PackageApp 会过滤文件名含 -bin- 的）
   const treeHapBuf = await step("pack tree hap", () => packTreeHap(sourceRoot, config));
 
-  // hapName 传 .app 里的名字：去掉了 "-unsigned"（实测 Gradle 产物就是这样）
+  // .app 里那个 hap 用产物 stem —— pack.info 的 packages[].name 由它去后缀得来，
+  // 所以这一个名字同时决定 zip 条目名和 pack.info 里的 name。
+  // 它本身不带 -signed：.app 里的 hap 从不单独签，签名在 .app 自己的 zip 层。
   const appBuf = await step(
     "pack app",
-    () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: "entry-release-lite.hap", config }).appBuf
+    () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: `${artifactStem}.hap`, config }).appBuf
   );
 
   // 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
@@ -215,17 +230,23 @@ export async function build(opts) {
 }
 
 /**
- * 把唯一一份产物写到 <工程>/build/ 根，文件名用 bundleName
+ * 把唯一一份产物写到 <工程>/build/ 根
+ *
+ * 文件名是 <stem>[-signed]<ext>，stem = <bundleName>-<moduleName>。
  *
  * 中间产物一个都不留，所以这里不需要「挑哪个是给人用的」—— 进来的就是答案。
- * 顺手删掉同 bundleName 的其它形态（.app / .hap / .bin）：那是上一次别的 target
- * 留下的，留着会让人装到旧包。
+ * 顺手删掉同 stem 的其它形态（3 种后缀 × 签/未签两种）：那是上一次别的 target、
+ * 或者 cert/ 里材料变了留下的旧包，留着会让人装错。
  */
-function publish(buf, outRoot, bundleName, ext) {
-  const dest = path.join(outRoot, `${bundleName}${ext}`);
+function publish(buf, outRoot, stem, ext, signed) {
+  const name = `${stem}${signed ? "-signed" : ""}${ext}`;
+  const dest = path.join(outRoot, name);
   fs.mkdirSync(outRoot, { recursive: true });
-  for (const other of [".app", ".hap", ".bin"]) {
-    if (other !== ext) fs.rmSync(path.join(outRoot, `${bundleName}${other}`), { force: true });
+  for (const otherExt of [".app", ".hap", ".bin"]) {
+    for (const otherSign of ["", "-signed"]) {
+      const other = `${stem}${otherSign}${otherExt}`;
+      if (other !== name) fs.rmSync(path.join(outRoot, other), { force: true });
+    }
   }
   fs.writeFileSync(dest, buf);
   return dest;

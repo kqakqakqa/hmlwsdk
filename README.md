@@ -163,6 +163,8 @@ myapp/
   build.config.js         ← compileSdkVersion 6 / compatibleSdkVersion 3
   hmlwsdk.config.js       ← 本机 SDK 路径（不进版本库）
   hmlwsdk.build.js + package.json + .gitignore
+  cert/default.p12        ← 模板自带的私钥库（密码见同目录 signing.config.js）
+  cert/signing.config.js  ← 已经写好了 p12 + password，只差一个 p7b
   cert/  build/           ← 各带一个忽略一切的 .gitignore
 ```
 
@@ -171,21 +173,29 @@ myapp/
 模板固定写 `com.example.app`，多个工程同时装表会互相顶掉，装之前改成自己的。
 `create` 完之后可以直接 `hmlwsdk buildBin`（实测 3.3 s 出 `.bin`）。
 
+**模板自带私钥，不带 profile。** `cert/` 里那份 `default.p12` 是模板的一部分，`create` 出来就有，
+所以私钥这一半不需要用户自己搞；缺的是 p7b —— 那是华为按 bundleName 签发的 profile，
+没法本地生成，得去 AppGallery Connect 申请（或者从任意已签名的 hap 里用
+`hap-sign-utils/extract-hap-to-app-p7b.js` 抽一份）。把 p7b 丢进 `cert/` 就能直接
+`hmlwsdk buildSignedApp`，不用改配置：`signing.config.js` 里的 `p12` / `password` 已经填好，
+`p7b` 会自动补上。
+
 `init` 那一步在工程里多出这些东西，**都不用传参数**：
 
 ```
 hmlwsdk.config.js     ← 不进版本库：本机 hmlwsdk 的路径 + 用哪个 node
-hmlwsdk.build.js      ← 进版本库：npm run build 的入口
+hmlwsdk.build.js      ← 进版本库：npm run build* 的入口
 cert/                 ← 进版本库的只有 .gitignore，签名材料丢在这里
   .gitignore
   signing.p7b         ← 你放进去的 profile
   signing.p12         ← 你放进去的私钥库（或 signing.pem）
   signing.config.js   ← 自动生成：p7b / p12 / password
 build/                ← 产物，只有 .gitignore 进版本库
-  <bundleName>.app
-  <bundleName>.hap
-  hmlwsdk/            ← 中间产物
+  <bundleName>-<moduleName>[-signed].bin|hap|app  ← 一次构建只落一份
 ```
+
+`init` **不往老工程里塞私钥** —— 那三行得你自己放。自带 `default.p12` 的只有 `create`
+从模板造出来的工程，见上面那段。
 
 `build.config.js` 不在这里 —— 它是**前提**，不是 init 生成的。`create` 造出来的工程自带，
 老工程得自己写一份（`export default { compileSdkVersion: 6, compatibleSdkVersion: 3 }`）。
@@ -200,13 +210,15 @@ build/                ← 产物，只有 .gitignore 进版本库
 工程它就正常起作用。
 
 `package.json` 会被补上 `"type": "module"`（生成的 `.js` 用 ESM 语法，DevEco 默认的
-`package.json` 是 `{}`，没有这个字段 Node 会把它们当 CommonJS 而报语法错）和四个 scripts：
+`package.json` 是 `{}`，没有这个字段 Node 会把它们当 CommonJS 而报语法错）和四个 scripts。
+script 名就是 CLI 那四条 build 命令，`npm run buildSignedApp` 与 `hmlwsdk buildSignedApp`
+跑的是同一条链：
 
 ```bash
-npm run build        # = node hmlwsdk.build.js，等价于 buildApp
-npm run build:bin
-npm run build:hap
-npm run build:app
+npm run buildBin        # .bin
+npm run buildApp        # .app，cert/ 有材料就签
+npm run buildSignedHap  # 里面那个 .bin 已签名的 hap，要求 cert/ 有材料
+npm run buildSignedApp  # 签名后的 .app，要求 cert/ 有材料
 ```
 
 ---
@@ -225,24 +237,25 @@ hmlwsdk <命令> [工程目录]
 
 `create` / `init` 各一条，加上四条 build 命令 = 两个停止点（`.bin` / hap 或 `.app`）× 有没有签名材料。
 
-| 命令 | 做什么 | 产出（相对 work） |
+| 命令 | 做什么 | 产出 |
 |---|---|---|
 | `create` | 从内置模板造一个新工程（模板 = 最小工程源码，不含任何构建脚本） | `entry/src/main/**`、`build.config.js`、`hmlwsdk.config.js`、`hmlwsdk.build.js`、`package.json`、`.gitignore`、`cert/`、`build/` |
 | `init` | 把已有工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
-| `buildBin` | 只构建 `.bin` | `bin/entry-release-unsigned.bin` |
-| `buildApp` | 构建到 `.app`，顺带把两种 hap 和 `.bin` 都出了 | `app/<工程名>-release-unsigned.app` + `pack.info`<br>`hap/entry-bin-release-lite-unsigned.hap`<br>`hap/entry-release-lite-unsigned.hap`<br>`bin/entry-release-unsigned.bin` |
-| `buildSignedHap` | 构建 + 签名，出可以装表的 hap | `hap/entry-bin-release-lite-signed.hap` |
-| `buildSignedApp` | 构建 + 签名，出签名的 `.app` | `app/<工程名>-release-signed.app` |
+| `buildBin` | 只出 `.bin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） |
+| `buildApp` | 出 `.app`，`cert/` 有材料就顺带签 | `build/<bundleName>-<moduleName>.app`（签过带 `-signed`） |
+| `buildSignedHap` | 出「里面那个 `.bin` 已签名」的 hap | `build/<bundleName>-<moduleName>-signed.hap` |
+| `buildSignedApp` | 出签名后的 `.app` | `build/<bundleName>-<moduleName>-signed.app` |
 
 `buildSignedHap` / `buildSignedApp` **要求 `cert/` 里真有签名材料**，没有直接报错 ——
 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
 `buildBin` / `buildApp` 有材料就顺带签，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
 
-不管哪条命令，最终产物都会拷一份到 `<工程>/build/` 根并改名成 `<bundleName>.app` /
-`<bundleName>.hap`（后者是单 `.bin` 形态、设备直接装的那个）。中间产物留在
-`build/hmlwsdk/` 里。
+不管哪条命令，**只落一份产物**：`<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`，
+`<ext>` 由命令决定（`.bin` / `.hap` / `.app`），签过的才带 `-signed`。
+写之前会先删掉同 stem 的其它形态（3 种后缀 × 签/未签两种）—— 留着就是上一次的旧包，装的时候分不清。
+中间产物全在系统临时目录里，跑完整个删掉，`build/` 下只剩那一份能直接用的。
 
-**没有单独的签名命令，也没有 `buildHap`。** 未签名的 hap 和 `.bin` 都是中间产物，照样留在 work 目录里。
+**没有单独的签名命令，也没有 `buildHap`。** 未签名的 `.bin` 和 hap 都是中间产物，只在内存里往后传。
 
 ### 构建步骤
 
@@ -255,20 +268,23 @@ buildSignedHap → signedHap
 buildSignedApp → signedApp
 ```
 
-| 步骤 | 做什么 | 产出（相对 work） |
+下表里的 `<stem>` = `<bundleName>-<moduleName>`，`moduleName` 取 config 里的 `distro.moduleName`（值就是 `entry`）。
+
+| 步骤 | 做什么 | 产物 |
 |---|---|---|
 | `read project` | 读 build.config.js 的版本号 + 源码 config.json | 无 |
 | `read signing` | 读 `cert/`，自动发现 p7b / 私钥 / 密码 | 无（回写 `cert/signing.config.js`） |
 | `merge config` | 注入 apiVersion、abilities 默认值 | 无（传对象，不落盘） |
-| `compile resources` | 编译资源（JS 实现，原 restool 的活） | `source/assets/entry/resources.index` + `resources/`<br>`R.txt` |
-| `compile js` | node + webpack 编译，再出 `.bc` | `source/assets/js/<组件>/*.js` `*.bc`<br>`manifest/<组件>/manifest.json` |
-| `assemble assets` | 回填资源 id、定型 config、删多余文件 | `source/config.json` |
-| `write bin` | 打成 `.bin` 私有容器 | `bin/entry-release-unsigned.bin` |
-| `sign bin` | 签 `.bin`（`cert/` 有材料才跑） | `bin/entry-release-signed.bin` |
-| `pack bin hap` | `.bin` 装进 hap —— **设备直接装的就是这种** | `hap/entry-bin-release-lite-unsigned.hap` |
-| `pack tree hap` | 文件树形态的 hap，只进 `.app` | `hap/entry-release-lite-unsigned.hap` |
-| `pack app` | 打 `.app` | `app/<工程名>-release-unsigned.app` + `pack.info` |
-| `sign app` | 签 `.app`（`cert/` 有材料才跑） | `app/<工程名>-release-signed.app` |
+| `compile resources` | 编译资源（JS 实现，原 restool 的活） | `work/source/assets/entry/resources.index` + `resources/`<br>`work/R.txt` |
+| `compile js` | node + webpack 编译，再出 `.bc` | `work/source/assets/js/<组件>/*.js` `*.bc`<br>`work/manifest/<组件>/manifest.json` |
+| `assemble assets` | 回填资源 id、定型 config、删多余文件 | `work/source/config.json` |
+| `write bin` | 打成 `.bin` 私有容器 | 内存 Buffer，hap 里的条目名是 `<stem>.bin` |
+| `sign bin` | 签 `.bin`（`cert/` 有材料才跑） | 内存 Buffer，`<stem>-signed.bin` |
+| `pack bin hap` | `.bin` 装进 hap —— **设备直接装的就是这种** | 内存 Buffer |
+| `pack tree hap` | 文件树形态的 hap，只进 `.app` | 内存 Buffer |
+| `pack app` | 打 `.app` | 内存 Buffer（内含 `<stem>.hap` + `pack.info`），同时落一份 `work/pack/pack.info` |
+| `sign app` | 签 `.app`（`cert/` 有材料才跑） | 内存 Buffer |
+| `publish` | 写到 `build/` 根，删掉同 stem 的其它形态 | `build/<stem>[-signed].<ext>` ← 唯一落盘的东西 |
 
 中间态一律用变量传，不落盘：资源直接编译进 `source/assets/entry`（没有独立的资源输出目录再拷一遍），
 `.bin` 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。必须落盘的只有三类 ——
@@ -354,30 +370,42 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 
 ### 最终交付物
 
-| 产物 | 路径（相对 work） | 说明 |
+一次构建只落一份：`<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`。里面是什么由命令决定：
+
+| 命令 | 落盘路径 | 内容 |
 |---|---|---|
-| `.bin`（未签名） | `bin/entry-release-unsigned.bin` | 私有容器，设备真正验签的对象 |
-| `.bin`（签名） | `bin/entry-release-signed.bin` | `cert/` 里有签名材料时才有 |
-| hap（`.bin` 形态） | `hap/entry-bin-release-lite-unsigned.hap` | 单条目，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
-| hap（`.bin` 形态，已签名） | `hap/entry-bin-release-lite-signed.hap` | `buildSignedHap` 的产物：里面那个 `.bin` 已签名，**不带 zip 签名块**。Gradle 的同名产物会多插一个 `HAP Sig Block 42`（实测差 6585 B），本 SDK 不插，理由见[签名](#签名) |
-| hap（文件树形态） | `hap/entry-release-lite-unsigned.hap` | 所有源文件打平成一个 zip（devdemo 实测 92 个条目），全部 stored，无目录条目。只进 `.app` |
-| `.app`（未签名） | `app/<工程名>-release-unsigned.app` | 装一份文件树形态 hap + `pack.info`，deflate 压缩 |
-| `.app`（签名） | `app/<工程名>-release-signed.app` | `cert/` 里有签名材料时才有 |
+| `buildBin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） | `.bin` 私有容器，设备真正验签的对象 |
+| `buildSignedHap` | `build/<bundleName>-<moduleName>-signed.hap` | 单条目 zip，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
+| `buildApp` | `build/<bundleName>-<moduleName>.app`（签过带 `-signed`） | 一份文件树形态 hap + `pack.info`，deflate 压缩 |
+| `buildSignedApp` | `build/<bundleName>-<moduleName>-signed.app` | 同上，另外带 `.app` 自己的 zip 签名块（`HAP Sig Block 42`） |
 
-上面这些都是 `build/hmlwsdk/` 下的中间产物。**实际给人用的是拷到工程根 `build/` 的两份**，
-命名用 `config.json` 里的 `bundleName`：
+**文件名本身就写着签没签**：`buildBin` / `buildApp` 在 `cert/` 没材料时不带 `-signed`，带了材料就加后缀。
 
-| 路径 | 内容 |
-|---|---|
-| `build/<bundleName>.hap` | 单 `.bin` 形态，设备直接装它（签名版或未签版，取决于 `cert/`） |
-| `build/<bundleName>.app` | 签名版或未签版，同上 |
+**中间产物一个都不落盘**：未签的 `.bin`、两种 hap 全在内存里往后传。webpack 的输入和输出必须
+过文件系统（它是独立进程），放在系统临时目录，构建完整个删掉 —— 所以 `build/` 下只有那一份产物。
 
-例：`bundleName` 是 `com.example.demo` 时，产出 `build/com.example.demo.app` 和 `build/com.example.demo.hap`。
+例：`bundleName` 是 `com.example.demo`、`moduleName` 是 `entry` 时，产出
+`build/com.example.demo-entry-signed.app`。
+
+命名口径（解包时对得上）。轻量穿戴这套里只有两个名字，别混：
+
+- **module** —— 固定 `entry`。出现在 `pack.info` 的 `distro.moduleName`、`.bin` 里的
+  `assets/entry/...`、以及 `resources.index` 里每条资源路径的前缀。设备按它定位资源。
+- **bundle** —— `config.json` 的 `bundleName`，就是这个应用本身。
+
+产物名两者都带，`<bundleName>-<moduleName>` 是 stem，签过的在 stem 后面加 `-signed`：
+
+- hap 里那个 `.bin` 叫 `<stem>.bin`，签过是 `<stem>-signed.bin`。
+- `.app` 里那份 hap 叫 `<stem>.hap` —— 它本身不带 `-signed`，`.app` 里的 hap 从不单独签，
+  签名在 `.app` 自己的 zip 层。
+- `pack.info` 的 `packages[].name` 填的是 **hap 文件名去掉 `.hap`**（Gradle 实测填的是
+  `entry-release-lite`，也是这条规则），所以这里就是 `<stem>`。注意它是 hap 自己的名字，
+  既不是 module 也不是 bundle —— 只是因为我们的 hap 拿 stem 打，两者才相同。
 
 注意两点：
 
 - **两种 hap 形态是 release 独有的**。反编译 `SingleLiteOptionsBuilder.executePack` 确认：liteWearable 一定先跑 `binBuilder` 出 `.bin` 形态，要不要再跑 `jsBundleBuilder` 出文件树形态看 `VariantData.isNeedPackage()`，而 `selectedBuildType` 默认取 `RELEASE`。debug 只出 `.bin` 形态。
-- **进 `.app` 的只有文件树形态**。`PackageApp.getHapPathFiles()` 会过滤掉「文件名含 `-bin-` 且 deviceType 含 liteWearable」的包。实测印证：`.app` 里那份 hap 的字节数与 `entry-release-lite-unsigned.hap` 完全相同。
+- **进 `.app` 的只有文件树形态**。`PackageApp.getHapPathFiles()` 会过滤掉「文件名含 `-bin-` 且 deviceType 含 liteWearable」的包。实测印证：`.app` 里那份 hap 的字节数与 Gradle 的 `entry-release-lite-unsigned.hap` 完全相同。
 
 ### `.bin` 内部布局
 
@@ -479,7 +507,7 @@ work/
 ```
 cert/
   .gitignore           ← 忽略自己以外的一切
-  signing.p7b          ← profile
+  signing.p7b          ← profile —— 唯一必须你自己提供的一份
   signing.p12          ← PKCS#12 私钥库（也可以换成签名.pem）
   signing.config.js    ← 自动生成/更新，也可以手写
 ```
@@ -497,6 +525,11 @@ cert/
 
 发现成功的结果会**回写** `cert/signing.config.js`（含明文密码，所以它放在被 ignore 的
 `cert/` 里，永远不进版本库）。下次直接读它，不再扫目录。
+
+**`create` 出来的工程不用猜密码。** 模板自带 `default.p12`，并且已经写好一份
+`signing.config.js`（`p12` + `password` 两项，`p7b` 故意留空 —— 声明一个不存在的文件
+是报错而不是跳过，而模板里本来就没有 profile）。所以那个「拿文件名当密码试」的兜底
+只在你自己换私钥、又没写密码的时候才会走到。
 
 两种私钥格式都支持，任何 Node 18+ 都能用：
 
@@ -531,7 +564,7 @@ Java 11+ 导出的 p12 都是 PBES2 + PBKDF2(HMAC-SHA256) + AES-256-CBC，实测
 
 ### hap 层签的是什么
 
-设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：先签 `.bin`（`sign bin`），再把它装进 hap —— 产物 `entry-bin-release-lite-signed.hap`，里面那份 `.bin` 与 `bin/entry-release-signed.bin` 逐字节相同。早先的实现是「打成 hap → 拆开读出 `.bin` → 判断已签 → 装回去」，那个拆包一步已经删掉了。
+设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：先签 `.bin`（`sign bin`），再把它装进 hap —— 产物 `build/<bundleName>-<moduleName>-signed.hap`，里面那个条目的名字是 `<bundleName>-<moduleName>-signed.bin`，内容与 Gradle 的 `entry-release-signed.bin` 逐字节相同。早先的实现是「打成 hap → 拆开读出 `.bin` → 判断已签 → 装回去」，那个拆包一步已经删掉了。
 
 Gradle 的 `signReleaseHap` 在同样的事情之外，还会往 hap 这个 zip 的中央目录前再插一个 `HAP Sig Block 42`（格式已经逆出来了，就在 `signZip.js` 里，`.app` 用的同一套）。实测 `apps/_3rd/随机事件` 的一对 debug 产物：
 
@@ -737,7 +770,7 @@ bin/hmlwsdk.js          CLI 实现，package.json 的 bin 字段指向它
 bin/hmlwsdk.cmd         Windows 的 cmd / PowerShell 入口（Windows 不认 shebang）
 bin/hmlwsdk             macOS / Linux 的 sh 入口
 templates/
-  liteWearableEmpty/    新工程的模板 = 最小工程源码（不含构建脚本，共 9 个文件）
+  liteWearableEmpty/    新工程的模板 = 最小工程源码 + 一份自带私钥（不含构建脚本，共 11 个文件）
 src/
   index.js              包的统一导出
   build.js              整条链 ← 查执行顺序看这里
