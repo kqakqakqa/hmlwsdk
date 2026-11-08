@@ -34,10 +34,13 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *
  * 落盘的只有一份，内容是哪个由 target 决定 ——
  *   build/<bundleName>-<moduleName>[-signed].bin   target=bin
- *   build/<bundleName>-<moduleName>[-signed].hap   target=signedHap
+ *   build/<bundleName>[-signed].hap                target=signedHap
  *   build/<bundleName>[-signed].app                target=app / signedApp
  * 签过的才带 -signed，所以文件名本身就说明这个包能不能直接装表。
- * `.app` 外面只写包名，不带模块名 —— 它装的是整个应用，模块名属于里面那个 hap。
+ * 名字带不带模块名看「这份产物代表谁」，不看后缀：.bin 是模块级产物，带模块名；
+ * `.bin` 形态的 hap 和 `.app` 装的都是整个应用，所以只写包名。
+ * 容器里的条目不算产物名 —— `.bin` 形态 hap 里那个唯一条目、`.app` 里那份文件树 hap
+ * 都还是模块级的，名字照样带模块名。
  * 中间产物（.bin、两种 hap、pack.info）全在内存里往后传，一行都不落盘。
  *
  * 必须落盘的只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
@@ -171,12 +174,13 @@ export async function build(opts) {
   );
 
   // ── 产物命名 ────────────────────────────────────────────────────────
-  // 两套名字，别混：
-  //   build/<bundleName>-<moduleName>[-signed].bin|hap   两个名字都带
-  //   build/<bundleName>[-signed].app                    只写包名
+  // 名字带不带模块名，看「这份产物代表谁」：
+  //   模块级    build/<bundleName>-<moduleName>[-signed].bin   只有 .bin
+  //   整个应用  build/<bundleName>[-signed].hap               .bin 形态的 hap
+  //   整个应用  build/<bundleName>[-signed].app               .app
   // moduleName 取 config 里的 distro.moduleName（DevEco 生成的工程都有，值就是 entry）。
-  // 这条规则只作用在 .app 自己的文件名上 —— 里面那份 hap 仍然叫 <bundleName>-<moduleName>.hap，
-  // 它是 hap，不是 .app 那层壳。
+  // 容器里的条目不算产物名：.bin 形态 hap 里那个唯一条目、.app 里那份文件树 hap
+  // 都是模块级的，名字照样带模块名，由下面的 binForHapName 和 packApp 那一步决定。
   const moduleName = config.module?.distro?.moduleName ?? "entry";
   const binStem = `${config.app.bundleName}-${moduleName}`;
   const appStem = config.app.bundleName;
@@ -192,7 +196,8 @@ export async function build(opts) {
   // 收尾：把唯一一份产物放到 build/ 根、清掉 scratch、返回它的路径。
   // 四个 target 都从这里出去，所以「只落一份」这件事只有一个实现点。
   const done = (buf, ext) => {
-    const stem = ext === ".app" ? appStem : binStem;
+    // 只有 .bin 是模块级；.hap（.bin 形态）和 .app 装的都是整个应用
+    const stem = ext === ".bin" ? binStem : appStem;
     const artifact = publish(buf, outRoot, stem, ext, Boolean(signingConfig), [binStem, appStem]);
 
     if (!signingConfig) {
@@ -241,7 +246,7 @@ export async function build(opts) {
  * 把唯一一份产物写到 <工程>/build/ 根
  *
  * 文件名是 <stem>[-signed]<ext>。stem 有两套（见 build 里「产物命名」那一段）：
- * .bin / hap 是 <bundleName>-<moduleName>，.app 是 <bundleName>。
+ * 模块级的 .bin 是 <bundleName>-<moduleName>，.bin 形态的 hap 和 .app 是 <bundleName>。
  *
  * 中间产物一个都不留，所以这里不需要「挑哪个是给人用的」—— 进来的就是答案。
  * 顺手删掉其它形态（3 种后缀 × 签/未签两种）：那是上一次别的 target、

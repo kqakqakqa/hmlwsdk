@@ -196,9 +196,11 @@ cert/                 ← 进版本库的只有 .gitignore，签名材料丢在�
   signing.config.js   ← 自动生成：p7b / p12 / password
   default.p12         ← 自带私钥：只在 cert/ 里一份材料都没有时才放（含配套 signing.config.js）
 build/                ← 产物，只有 .gitignore 进版本库
-  <bundleName>-<moduleName>[-signed].bin|hap  ← 一次构建只落一份
-  <bundleName>[-signed].app                   ← .app 外面不带模块名
+  <bundleName>-<moduleName>[-signed].bin  ← 模块级，带模块名
+  <bundleName>[-signed].hap               ← .bin 形态 hap，整个应用
+  <bundleName>[-signed].app               ← 整个应用
 ```
+一次构建只落一份。
 
 `init` **不会覆盖你已有的签名材料**：`cert/` 里已经有 p7b 或私钥，它一个字节都不动。
 
@@ -252,16 +254,18 @@ hmlwsdk <命令> [工程目录]
 | `init` | 把已有工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
 | `buildBin` | 只出 `.bin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） |
 | `buildApp` | 出 `.app`，`cert/` 有材料就顺带签 | `build/<bundleName>.app`（签过带 `-signed`） |
-| `buildSignedHap` | 出「里面那个 `.bin` 已签名」的 hap | `build/<bundleName>-<moduleName>-signed.hap` |
+| `buildSignedHap` | 出「里面那个 `.bin` 已签名」的 hap | `build/<bundleName>-signed.hap` |
 | `buildSignedApp` | 出签名后的 `.app` | `build/<bundleName>-signed.app` |
 
 `buildSignedHap` / `buildSignedApp` **要求 `cert/` 里真有签名材料**，没有直接报错 ——
 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
 `buildBin` / `buildApp` 有材料就顺带签，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
 
-不管哪条命令，**只落一份产物**：`.bin` / hap 是 `<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`，
-`.app` 是 `<工程>/build/<bundleName>[-signed].app` —— `.app` 外面只写包名，不带模块名。
-`<ext>` 由命令决定（`.bin` / `.hap` / `.app`），签过的才带 `-signed`。
+不管哪条命令，**只落一份产物**，名字带不带模块名看「这份产物代表谁」：
+`.bin` 是模块级产物 → `<工程>/build/<bundleName>-<moduleName>[-signed].bin`；
+`.bin` 形态的 hap 和 `.app` 装的都是整个应用 → `<工程>/build/<bundleName>[-signed].hap` /
+`<工程>/build/<bundleName>[-signed].app`。
+签过的才带 `-signed`。
 写之前会先删掉两套名字下的其它形态（3 种后缀 × 签/未签两种）—— 留着就是上一次的旧包，装的时候分不清。
 中间产物全在系统临时目录里，跑完整个删掉，`build/` 下只剩那一份能直接用的。
 
@@ -279,7 +283,7 @@ buildSignedApp → signedApp
 ```
 
 下表里的 `<stem>` = `<bundleName>-<moduleName>`，`moduleName` 取 config 里的 `distro.moduleName`（值就是 `entry`）。
-`.app` 自己的文件名用 `<bundleName>`，见最后一行。
+它只用在 `.bin` 上；`.bin` 形态的 hap 和 `.app` 自己的文件名用 `<bundleName>`，见最后几行。
 
 | 步骤 | 做什么 | 产物 |
 |---|---|---|
@@ -295,7 +299,7 @@ buildSignedApp → signedApp
 | `pack tree hap` | 文件树形态的 hap，只进 `.app` | 内存 Buffer |
 | `pack app` | 打 `.app` | 内存 Buffer（内含 `<stem>.hap` + `pack.info`），同时落一份 `work/pack/pack.info` |
 | `sign app` | 签 `.app`（`cert/` 有材料才跑） | 内存 Buffer |
-| `publish` | 写到 `build/` 根，删掉两套名字下的其它形态 | `build/<stem>[-signed].<ext>`、`build/<bundleName>[-signed].app` ← 唯一落盘的东西 |
+| `publish` | 写到 `build/` 根，删掉两套名字下的其它形态 | `build/<stem>[-signed].bin`、`build/<bundleName>[-signed].{hap,app}` ← 唯一落盘的东西 |
 
 中间态一律用变量传，不落盘：资源直接编译进 `source/assets/entry`（没有独立的资源输出目录再拷一遍），
 `.bin` 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。必须落盘的只有三类 ——
@@ -381,12 +385,13 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 
 ### 最终交付物
 
-一次构建只落一份，路径里带不带模块名看后缀 —— `.bin` / hap 带，`.app` 不带。里面是什么由命令决定：
+一次构建只落一份，路径里带不带模块名看「这份产物代表谁」—— `.bin` 带（模块级），
+`.bin` 形态的 hap 和 `.app` 不带（整个应用）。里面是什么由命令决定：
 
 | 命令 | 落盘路径 | 内容 |
 |---|---|---|
 | `buildBin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） | `.bin` 私有容器，设备真正验签的对象 |
-| `buildSignedHap` | `build/<bundleName>-<moduleName>-signed.hap` | 单条目 zip，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
+| `buildSignedHap` | `build/<bundleName>-signed.hap` | 单条目 zip，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
 | `buildApp` | `build/<bundleName>.app`（签过带 `-signed`） | 一份文件树形态 hap + `pack.info`，deflate 压缩 |
 | `buildSignedApp` | `build/<bundleName>-signed.app` | 同上，另外带 `.app` 自己的 zip 签名块（`HAP Sig Block 42`） |
 
@@ -395,8 +400,9 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 **中间产物一个都不落盘**：未签的 `.bin`、两种 hap 全在内存里往后传。webpack 的输入和输出必须
 过文件系统（它是独立进程），放在系统临时目录，构建完整个删掉 —— 所以 `build/` 下只有那一份产物。
 
-例：`bundleName` 是 `com.example.demo`、`moduleName` 是 `entry` 时，产出
-`build/com.example.demo-signed.app`，里面装着 `com.example.demo-entry.hap`。
+例：`bundleName` 是 `com.example.demo`、`moduleName` 是 `entry` 时，
+`buildSignedApp` 产出 `build/com.example.demo-signed.app`，里面装着 `com.example.demo-entry.hap`；
+`buildSignedHap` 产出 `build/com.example.demo-signed.hap`，里面装着 `com.example.demo-entry-signed.bin`。
 
 命名口径（解包时对得上）。轻量穿戴这套里只有两个名字，别混：
 
@@ -404,12 +410,14 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
   `assets/entry/...`、以及 `resources.index` 里每条资源路径的前缀。设备按它定位资源。
 - **bundle** —— `config.json` 的 `bundleName`，就是这个应用本身。
 
-`.bin` 和 hap 两个名字都带，`<bundleName>-<moduleName>` 是它们的 stem，签过的在 stem 后面加 `-signed`。
-**`.app` 自己的文件名只写包名**，因为它装的是整个应用，模块名属于里面那个 hap：
+`.bin` 带 `<bundleName>-<moduleName>`（`<stem>`），签过的在 stem 后面加 `-signed`。
+**`.bin` 形态的 hap 和 `.app` 只写包名**，它们装的都是整个应用：
 
-- hap 里那个 `.bin` 叫 `<stem>.bin`，签过是 `<stem>-signed.bin`。
-- `.app` 里那份 hap 叫 `<stem>.hap` —— 它本身不带 `-signed`，`.app` 里的 hap 从不单独签，
-  签名在 `.app` 自己的 zip 层。
+- `.bin` 本体叫 `<stem>.bin`，签过是 `<stem>-signed.bin`（模块级产物）。
+- hap 里那个 `.bin` 条目也叫 `<stem>.bin` / `<stem>-signed.bin`。
+- `.app` 里那份 hap 叫 `<stem>.hap` —— 它是文件树形态、模块级，名字带模块名；
+  它本身不带 `-signed`，`.app` 里的 hap 从不单独签，签名在 `.app` 自己的 zip 层。
+- `.bin` 形态的 hap 本体叫 `<bundleName>.hap`，签过是 `<bundleName>-signed.hap`。
 - `.app` 本体叫 `<bundleName>.app`，签过是 `<bundleName>-signed.app`。
 - `pack.info` 的 `packages[].name` 填的是 **hap 文件名去掉 `.hap`**（Gradle 实测填的是
   `entry-release-lite`，也是这条规则），所以这里就是 `<stem>`。注意它是 hap 自己的名字，
@@ -577,7 +585,7 @@ Java 11+ 导出的 p12 都是 PBES2 + PBKDF2(HMAC-SHA256) + AES-256-CBC，实测
 
 ### hap 层签的是什么
 
-设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：先签 `.bin`（`sign bin`），再把它装进 hap —— 产物 `build/<bundleName>-<moduleName>-signed.hap`，里面那个条目的名字是 `<bundleName>-<moduleName>-signed.bin`，内容与 Gradle 的 `entry-release-signed.bin` 逐字节相同。早先的实现是「打成 hap → 拆开读出 `.bin` → 判断已签 → 装回去」，那个拆包一步已经删掉了。
+设备验的是 `.bin` 自己的签名块，hap 只是装着 bin 的 zip。所以 `buildSignedHap` 做的事是：先签 `.bin`（`sign bin`），再把它装进 hap —— 产物 `build/<bundleName>-signed.hap`，里面那个条目的名字是 `<bundleName>-<moduleName>-signed.bin`，内容与 Gradle 的 `entry-release-signed.bin` 逐字节相同。早先的实现是「打成 hap → 拆开读出 `.bin` → 判断已签 → 装回去」，那个拆包一步已经删掉了。
 
 Gradle 的 `signReleaseHap` 在同样的事情之外，还会往 hap 这个 zip 的中央目录前再插一个 `HAP Sig Block 42`（格式已经逆出来了，就在 `signZip.js` 里，`.app` 用的同一套）。实测 `apps/_3rd/随机事件` 的一对 debug 产物：
 

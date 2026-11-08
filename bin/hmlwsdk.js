@@ -34,11 +34,12 @@ import { readProjectConfig } from "../src/readProjectConfig.js";
  *   buildSignedHap  出「里面那个 .bin 已签名」的 hap，要求 cert/ 有材料
  *   buildSignedApp  出签名后的 .app，要求 cert/ 有材料
  *
- * 最终产物只有一份，落在 <工程>/build/ 根，名字用 bundleName：
- *   buildBin        build/<bundleName>.bin
- *   buildApp        build/<bundleName>.app
- *   buildSignedHap  build/<bundleName>.hap
- *   buildSignedApp  build/<bundleName>.app
+ * 最终产物只有一份，落在 <工程>/build/ 根。带不带模块名看这份产物代表谁：
+ *   buildBin        build/<bundleName>-<moduleName>.bin   模块级
+ *   buildApp        build/<bundleName>.app                整个应用
+ *   buildSignedHap  build/<bundleName>.hap                整个应用
+ *   buildSignedApp  build/<bundleName>.app                整个应用
+ * 签过的在扩展名前加 -signed。
  * 中间产物（.bin、两种 hap、pack.info）不落盘，只在内存里往后传。
  */
 
