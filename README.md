@@ -8,7 +8,7 @@ cd myapp
 hmlwsdk buildSignedApp       # 签名材料丢进 cert/ 之后，一条命令出包
 ```
 
-已有 DevEco 工程的话跳过 `create`，先写一份 `build.config.js`（两个 SDK 版本号），再在工程根跑一次 `hmlwsdk init`（生成 `hmlwsdk.config.js` / `cert/` / `hmlwsdk.build.js`），之后一样随时 `buildSignedApp`。
+已有 DevEco 工程的话跳过 `create`，先写一份 `build.config.js`（两个 SDK 版本号），再在工程根跑一次 `hmlwsdk init`（生成 `hmlwsdk.config.js` / `cert/` / `hmlwsdk-build.js`），之后一样随时 `buildSignedApp`。
 
 运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不依赖 native 二进制。
 
@@ -162,8 +162,8 @@ myapp/
       media/icon.png + icon_small.png
   build.config.js         ← compileSdkVersion 6 / compatibleSdkVersion 3
   hmlwsdk.config.js       ← 本机 SDK 路径（不进版本库）
-  hmlwsdk.build.js + package.json + .gitignore
-  cert/default.p12        ← 模板自带的私钥库（密码见同目录 signing.config.js）
+  hmlwsdk-build.js + package.json + .gitignore
+  cert/default.p12        ← 自带的私钥库（密码见同目录 signing.config.js）
   cert/signing.config.js  ← 已经写好了 p12 + password，只差一个 p7b
   cert/  build/           ← 各带一个忽略一切的 .gitignore
 ```
@@ -173,29 +173,38 @@ myapp/
 模板固定写 `com.example.app`，多个工程同时装表会互相顶掉，装之前改成自己的。
 `create` 完之后可以直接 `hmlwsdk buildBin`（实测 3.3 s 出 `.bin`）。
 
-**模板自带私钥，不带 profile。** `cert/` 里那份 `default.p12` 是模板的一部分，`create` 出来就有，
-所以私钥这一半不需要用户自己搞；缺的是 p7b —— 那是华为按 bundleName 签发的 profile，
-没法本地生成，得去 AppGallery Connect 申请（或者从任意已签名的 hap 里用
+**私钥白送，profile 不送。** `cert/default.p12` 由 `init` 那一步放进工程（`create` 也走同一步，
+所以新工程照样有），私钥这一半不需要用户自己搞；缺的是 p7b —— 那是华为按 bundleName 签发的
+profile，没法本地生成，得去 AppGallery Connect 申请（或者从任意已签名的 hap 里用
 `hap-sign-utils/extract-hap-to-app-p7b.js` 抽一份）。把 p7b 丢进 `cert/` 就能直接
 `hmlwsdk buildSignedApp`，不用改配置：`signing.config.js` 里的 `p12` / `password` 已经填好，
 `p7b` 会自动补上。
+
+**只有 `cert/` 原本是空的时候才放这份私钥。** 里面已经有 `.p7b`、`.p12`、`.pem` 或
+`signing.config.js` 中任何一个，这一步就整个跳过 —— 你想用自己那套材料时，`init` 不会往
+`cert/` 里多塞一份来打架。
 
 `init` 那一步在工程里多出这些东西，**都不用传参数**：
 
 ```
 hmlwsdk.config.js     ← 不进版本库：本机 hmlwsdk 的路径 + 用哪个 node
-hmlwsdk.build.js      ← 进版本库：npm run build* 的入口
+hmlwsdk-build.js      ← 进版本库：npm run build* 的入口
 cert/                 ← 进版本库的只有 .gitignore，签名材料丢在这里
   .gitignore
   signing.p7b         ← 你放进去的 profile
   signing.p12         ← 你放进去的私钥库（或 signing.pem）
   signing.config.js   ← 自动生成：p7b / p12 / password
+  default.p12         ← 自带私钥：只在 cert/ 里一份材料都没有时才放（含配套 signing.config.js）
 build/                ← 产物，只有 .gitignore 进版本库
-  <bundleName>-<moduleName>[-signed].bin|hap|app  ← 一次构建只落一份
+  <bundleName>-<moduleName>[-signed].bin|hap  ← 一次构建只落一份
+  <bundleName>[-signed].app                   ← .app 外面不带模块名
 ```
 
-`init` **不往老工程里塞私钥** —— 那三行得你自己放。自带 `default.p12` 的只有 `create`
-从模板造出来的工程，见上面那段。
+`init` **不会覆盖你已有的签名材料**：`cert/` 里已经有 p7b 或私钥，它一个字节都不动。
+
+入口文件早先叫 `hmlwsdk.build.js`，现在叫 `hmlwsdk-build.js`。老工程重跑 `init` 会把
+`package.json` 里指向旧名的 script 改过来；旧文件不会自动删（里面可能被你加过东西），
+见到那行提示自己删掉就行。
 
 `build.config.js` 不在这里 —— 它是**前提**，不是 init 生成的。`create` 造出来的工程自带，
 老工程得自己写一份（`export default { compileSdkVersion: 6, compatibleSdkVersion: 3 }`）。
@@ -239,20 +248,21 @@ hmlwsdk <命令> [工程目录]
 
 | 命令 | 做什么 | 产出 |
 |---|---|---|
-| `create` | 从内置模板造一个新工程（模板 = 最小工程源码，不含任何构建脚本） | `entry/src/main/**`、`build.config.js`、`hmlwsdk.config.js`、`hmlwsdk.build.js`、`package.json`、`.gitignore`、`cert/`、`build/` |
+| `create` | 从内置模板造一个新工程（模板 = 最小工程源码，不含任何构建脚本） | `entry/src/main/**`、`build.config.js`、`hmlwsdk.config.js`、`hmlwsdk-build.js`、`package.json`、`.gitignore`、`cert/`、`build/` |
 | `init` | 把已有工程初始化成「一条命令出包」 | 见[快速开始](#快速开始) |
 | `buildBin` | 只出 `.bin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） |
-| `buildApp` | 出 `.app`，`cert/` 有材料就顺带签 | `build/<bundleName>-<moduleName>.app`（签过带 `-signed`） |
+| `buildApp` | 出 `.app`，`cert/` 有材料就顺带签 | `build/<bundleName>.app`（签过带 `-signed`） |
 | `buildSignedHap` | 出「里面那个 `.bin` 已签名」的 hap | `build/<bundleName>-<moduleName>-signed.hap` |
-| `buildSignedApp` | 出签名后的 `.app` | `build/<bundleName>-<moduleName>-signed.app` |
+| `buildSignedApp` | 出签名后的 `.app` | `build/<bundleName>-signed.app` |
 
 `buildSignedHap` / `buildSignedApp` **要求 `cert/` 里真有签名材料**，没有直接报错 ——
 命令名承诺了要出签名产物，静默退回 unsigned 是坑。
 `buildBin` / `buildApp` 有材料就顺带签，与 Gradle 没配 `signingConfig` 就出 unsigned 的行为一致。
 
-不管哪条命令，**只落一份产物**：`<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`，
+不管哪条命令，**只落一份产物**：`.bin` / hap 是 `<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`，
+`.app` 是 `<工程>/build/<bundleName>[-signed].app` —— `.app` 外面只写包名，不带模块名。
 `<ext>` 由命令决定（`.bin` / `.hap` / `.app`），签过的才带 `-signed`。
-写之前会先删掉同 stem 的其它形态（3 种后缀 × 签/未签两种）—— 留着就是上一次的旧包，装的时候分不清。
+写之前会先删掉两套名字下的其它形态（3 种后缀 × 签/未签两种）—— 留着就是上一次的旧包，装的时候分不清。
 中间产物全在系统临时目录里，跑完整个删掉，`build/` 下只剩那一份能直接用的。
 
 **没有单独的签名命令，也没有 `buildHap`。** 未签名的 `.bin` 和 hap 都是中间产物，只在内存里往后传。
@@ -269,6 +279,7 @@ buildSignedApp → signedApp
 ```
 
 下表里的 `<stem>` = `<bundleName>-<moduleName>`，`moduleName` 取 config 里的 `distro.moduleName`（值就是 `entry`）。
+`.app` 自己的文件名用 `<bundleName>`，见最后一行。
 
 | 步骤 | 做什么 | 产物 |
 |---|---|---|
@@ -284,7 +295,7 @@ buildSignedApp → signedApp
 | `pack tree hap` | 文件树形态的 hap，只进 `.app` | 内存 Buffer |
 | `pack app` | 打 `.app` | 内存 Buffer（内含 `<stem>.hap` + `pack.info`），同时落一份 `work/pack/pack.info` |
 | `sign app` | 签 `.app`（`cert/` 有材料才跑） | 内存 Buffer |
-| `publish` | 写到 `build/` 根，删掉同 stem 的其它形态 | `build/<stem>[-signed].<ext>` ← 唯一落盘的东西 |
+| `publish` | 写到 `build/` 根，删掉两套名字下的其它形态 | `build/<stem>[-signed].<ext>`、`build/<bundleName>[-signed].app` ← 唯一落盘的东西 |
 
 中间态一律用变量传，不落盘：资源直接编译进 `source/assets/entry`（没有独立的资源输出目录再拷一遍），
 `.bin` 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。必须落盘的只有三类 ——
@@ -370,14 +381,14 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 
 ### 最终交付物
 
-一次构建只落一份：`<工程>/build/<bundleName>-<moduleName>[-signed].<ext>`。里面是什么由命令决定：
+一次构建只落一份，路径里带不带模块名看后缀 —— `.bin` / hap 带，`.app` 不带。里面是什么由命令决定：
 
 | 命令 | 落盘路径 | 内容 |
 |---|---|---|
 | `buildBin` | `build/<bundleName>-<moduleName>.bin`（签过带 `-signed`） | `.bin` 私有容器，设备真正验签的对象 |
 | `buildSignedHap` | `build/<bundleName>-<moduleName>-signed.hap` | 单条目 zip，只有那个 `.bin`，stored 不压缩。**设备直接装的就是这种** |
-| `buildApp` | `build/<bundleName>-<moduleName>.app`（签过带 `-signed`） | 一份文件树形态 hap + `pack.info`，deflate 压缩 |
-| `buildSignedApp` | `build/<bundleName>-<moduleName>-signed.app` | 同上，另外带 `.app` 自己的 zip 签名块（`HAP Sig Block 42`） |
+| `buildApp` | `build/<bundleName>.app`（签过带 `-signed`） | 一份文件树形态 hap + `pack.info`，deflate 压缩 |
+| `buildSignedApp` | `build/<bundleName>-signed.app` | 同上，另外带 `.app` 自己的 zip 签名块（`HAP Sig Block 42`） |
 
 **文件名本身就写着签没签**：`buildBin` / `buildApp` 在 `cert/` 没材料时不带 `-signed`，带了材料就加后缀。
 
@@ -385,7 +396,7 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
 过文件系统（它是独立进程），放在系统临时目录，构建完整个删掉 —— 所以 `build/` 下只有那一份产物。
 
 例：`bundleName` 是 `com.example.demo`、`moduleName` 是 `entry` 时，产出
-`build/com.example.demo-entry-signed.app`。
+`build/com.example.demo-signed.app`，里面装着 `com.example.demo-entry.hap`。
 
 命名口径（解包时对得上）。轻量穿戴这套里只有两个名字，别混：
 
@@ -393,11 +404,13 @@ api6 的 restool **不支持** `symbol`（报 `Json tag symbol is invalid`）和
   `assets/entry/...`、以及 `resources.index` 里每条资源路径的前缀。设备按它定位资源。
 - **bundle** —— `config.json` 的 `bundleName`，就是这个应用本身。
 
-产物名两者都带，`<bundleName>-<moduleName>` 是 stem，签过的在 stem 后面加 `-signed`：
+`.bin` 和 hap 两个名字都带，`<bundleName>-<moduleName>` 是它们的 stem，签过的在 stem 后面加 `-signed`。
+**`.app` 自己的文件名只写包名**，因为它装的是整个应用，模块名属于里面那个 hap：
 
 - hap 里那个 `.bin` 叫 `<stem>.bin`，签过是 `<stem>-signed.bin`。
 - `.app` 里那份 hap 叫 `<stem>.hap` —— 它本身不带 `-signed`，`.app` 里的 hap 从不单独签，
   签名在 `.app` 自己的 zip 层。
+- `.app` 本体叫 `<bundleName>.app`，签过是 `<bundleName>-signed.app`。
 - `pack.info` 的 `packages[].name` 填的是 **hap 文件名去掉 `.hap`**（Gradle 实测填的是
   `entry-release-lite`，也是这条规则），所以这里就是 `<stem>`。注意它是 hap 自己的名字，
   既不是 module 也不是 bundle —— 只是因为我们的 hap 拿 stem 打，两者才相同。
@@ -526,9 +539,9 @@ cert/
 发现成功的结果会**回写** `cert/signing.config.js`（含明文密码，所以它放在被 ignore 的
 `cert/` 里，永远不进版本库）。下次直接读它，不再扫目录。
 
-**`create` 出来的工程不用猜密码。** 模板自带 `default.p12`，并且已经写好一份
+**`cert/` 原本空着的工程不用猜密码。** 那一步会放好 `default.p12`，并且写好一份
 `signing.config.js`（`p12` + `password` 两项，`p7b` 故意留空 —— 声明一个不存在的文件
-是报错而不是跳过，而模板里本来就没有 profile）。所以那个「拿文件名当密码试」的兜底
+是报错而不是跳过，而这时本来就没有 profile）。所以那个「拿文件名当密码试」的兜底
 只在你自己换私钥、又没写密码的时候才会走到。
 
 两种私钥格式都支持，任何 Node 18+ 都能用：
@@ -770,7 +783,8 @@ bin/hmlwsdk.js          CLI 实现，package.json 的 bin 字段指向它
 bin/hmlwsdk.cmd         Windows 的 cmd / PowerShell 入口（Windows 不认 shebang）
 bin/hmlwsdk             macOS / Linux 的 sh 入口
 templates/
-  liteWearableEmpty/    新工程的模板 = 最小工程源码 + 一份自带私钥（不含构建脚本，共 11 个文件）
+  liteWearableEmpty/    新工程的模板 = 最小工程源码（不含构建脚本，共 9 个文件）
+  projectInit/          init 写进工程的文件，含 cert/ 下那两份签名材料
 src/
   index.js              包的统一导出
   build.js              整条链 ← 查执行顺序看这里

@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  *   npm run buildSignedHap    the hap whose inner .bin is signed (requires material in cert/)
  *   npm run buildSignedApp    the signed .app (requires material in cert/)
  *
- *   node hmlwsdk.build.js <bin|app|signedHap|signedApp>
+ *   node hmlwsdk-build.js <bin|app|signedHap|signedApp>
  *
  * The four script names are the hmlwsdk CLI commands, so "npm run buildSignedApp" and
  * "hmlwsdk buildSignedApp" run the same chain — there is only one set of names to remember.

@@ -32,12 +32,12 @@ import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
  *   app        出 .app                           （给了签名配置就顺带签）
  *   signedApp  出签名后的 .app
  *
- * 落盘的只有一份：<工程>/build/<bundleName>-<moduleName>[-signed].<ext>，
- * 内容是哪个由 target 决定 ——
- *   ...bin   target=bin
- *   ...hap   target=signedHap
- *   ...app   target=app / signedApp
+ * 落盘的只有一份，内容是哪个由 target 决定 ——
+ *   build/<bundleName>-<moduleName>[-signed].bin   target=bin
+ *   build/<bundleName>-<moduleName>[-signed].hap   target=signedHap
+ *   build/<bundleName>[-signed].app                target=app / signedApp
  * 签过的才带 -signed，所以文件名本身就说明这个包能不能直接装表。
+ * `.app` 外面只写包名，不带模块名 —— 它装的是整个应用，模块名属于里面那个 hap。
  * 中间产物（.bin、两种 hap、pack.info）全在内存里往后传，一行都不落盘。
  *
  * 必须落盘的只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
@@ -85,7 +85,7 @@ export async function build(opts) {
   const signingConfig =
     opts.signingConfig ?? (await step("read signing", () => readSigningConfig(project.root)));
 
-  // 说的是「凑不齐可用配置」而不是「没有材料」：模板自带 cert/default.p12，
+  // 说的是「凑不齐可用配置」而不是「没有材料」：init 会把 cert/default.p12 放进去，
   // 常见情形是私钥已经在、只差 p7b，报「no signing material」会让人以为目录是空的。
   if (opts.target.startsWith("signed") && !signingConfig) {
     throw new Error(
@@ -109,7 +109,7 @@ export async function build(opts) {
   const rTxtPath = path.join(work, "R.txt");
   // pack.info 的落点（它同时被打进 .app，磁盘这份是 packApp 的副产物）
   const packDir = path.join(work, "pack");
-  // 唯一一份产物放这儿，命名规则见下面的 artifactStem —— 见文件末尾的 publish()
+  // 唯一一份产物放这儿，命名规则见下面的「产物命名」那一段 —— 见文件末尾的 publish()
   const outRoot = path.join(project.root, "build");
 
   // mergeProfile 之后的 config 只是中间态，不落盘 —— 真正要看的是
@@ -147,7 +147,9 @@ export async function build(opts) {
       sourceRoot,
       // 用哪个 node 跑 webpack：来自 hmlwsdk.config.js，没写就是当前进程
       node: opts.node,
-      iconDir: path.join(assetsEntry, "resources")
+      iconDir: path.join(assetsEntry, "resources"),
+      // 这一步动辄 5 s 以上，内部再分四段计时（manifest / webpack / clean / snapshot）
+      step: step.child
     })
   );
 
@@ -169,24 +171,30 @@ export async function build(opts) {
   );
 
   // ── 产物命名 ────────────────────────────────────────────────────────
-  // 轻量穿戴这套里只有 module 和 bundle 两个名字，产物名两者都带：
-  //   <bundleName>-<moduleName>[-signed].<ext>
+  // 两套名字，别混：
+  //   build/<bundleName>-<moduleName>[-signed].bin|hap   两个名字都带
+  //   build/<bundleName>[-signed].app                    只写包名
   // moduleName 取 config 里的 distro.moduleName（DevEco 生成的工程都有，值就是 entry）。
+  // 这条规则只作用在 .app 自己的文件名上 —— 里面那份 hap 仍然叫 <bundleName>-<moduleName>.hap，
+  // 它是 hap，不是 .app 那层壳。
   const moduleName = config.module?.distro?.moduleName ?? "entry";
-  const artifactStem = `${config.app.bundleName}-${moduleName}`;
+  const binStem = `${config.app.bundleName}-${moduleName}`;
+  const appStem = config.app.bundleName;
 
   // cert/ 里没材料时不签，unsigned 直接当 signed 往下传
   let binForHap = unsignedBinBuf;
-  let binForHapName = `${artifactStem}.bin`;
+  let binForHapName = `${binStem}.bin`;
   if (signingConfig) {
-    binForHapName = `${artifactStem}-signed.bin`;
+    binForHapName = `${binStem}-signed.bin`;
     binForHap = await step("sign bin", () => signBinBuffer(unsignedBinBuf, signingConfig));
   }
 
   // 收尾：把唯一一份产物放到 build/ 根、清掉 scratch、返回它的路径。
   // 四个 target 都从这里出去，所以「只落一份」这件事只有一个实现点。
   const done = (buf, ext) => {
-    const artifact = publish(buf, outRoot, artifactStem, ext, Boolean(signingConfig));
+    const stem = ext === ".app" ? appStem : binStem;
+    const artifact = publish(buf, outRoot, stem, ext, Boolean(signingConfig), [binStem, appStem]);
+
     if (!signingConfig) {
       log(`! no usable signing config in ${CERT_DIR}/, ${path.basename(artifact)} is unsigned and cannot be installed on a watch`);
     }
@@ -212,12 +220,12 @@ export async function build(opts) {
   // 文件树形态：.bin 形态进不了 .app（PackageApp 会过滤文件名含 -bin- 的）
   const treeHapBuf = await step("pack tree hap", () => packTreeHap(sourceRoot, config));
 
-  // .app 里那个 hap 用产物 stem —— pack.info 的 packages[].name 由它去后缀得来，
+  // .app 里那个 hap 用 binStem —— pack.info 的 packages[].name 由它去后缀得来，
   // 所以这一个名字同时决定 zip 条目名和 pack.info 里的 name。
   // 它本身不带 -signed：.app 里的 hap 从不单独签，签名在 .app 自己的 zip 层。
   const appBuf = await step(
     "pack app",
-    () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: `${artifactStem}.hap`, config }).appBuf
+    () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: `${binStem}.hap`, config }).appBuf
   );
 
   // 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
@@ -232,20 +240,25 @@ export async function build(opts) {
 /**
  * 把唯一一份产物写到 <工程>/build/ 根
  *
- * 文件名是 <stem>[-signed]<ext>，stem = <bundleName>-<moduleName>。
+ * 文件名是 <stem>[-signed]<ext>。stem 有两套（见 build 里「产物命名」那一段）：
+ * .bin / hap 是 <bundleName>-<moduleName>，.app 是 <bundleName>。
  *
  * 中间产物一个都不留，所以这里不需要「挑哪个是给人用的」—— 进来的就是答案。
- * 顺手删掉同 stem 的其它形态（3 种后缀 × 签/未签两种）：那是上一次别的 target、
+ * 顺手删掉其它形态（3 种后缀 × 签/未签两种）：那是上一次别的 target、
  * 或者 cert/ 里材料变了留下的旧包，留着会让人装错。
+ * 清理要把两套 stem 一起扫 —— 只按当前 stem 删的话，上一次 .app 用的是另一套名字，
+ * 那份旧包就永远没人删，而它的名字跟新产物只差一个模块名，装的时候最容易混淆。
  */
-function publish(buf, outRoot, stem, ext, signed) {
+function publish(buf, outRoot, stem, ext, signed, staleStems) {
   const name = `${stem}${signed ? "-signed" : ""}${ext}`;
   const dest = path.join(outRoot, name);
   fs.mkdirSync(outRoot, { recursive: true });
-  for (const otherExt of [".app", ".hap", ".bin"]) {
-    for (const otherSign of ["", "-signed"]) {
-      const other = `${stem}${otherSign}${otherExt}`;
-      if (other !== name) fs.rmSync(path.join(outRoot, other), { force: true });
+  for (const s of staleStems) {
+    for (const otherExt of [".app", ".hap", ".bin"]) {
+      for (const otherSign of ["", "-signed"]) {
+        const other = `${s}${otherSign}${otherExt}`;
+        if (other !== name) fs.rmSync(path.join(outRoot, other), { force: true });
+      }
     }
   }
   fs.writeFileSync(dest, buf);
@@ -295,17 +308,92 @@ function signBinBuffer(unsignedBuf, signingConfig) {
 /**
  * 每步打一行耗时，失败时把步骤名补进错误信息
  * 不加这一步的话，webpack 报错只会在几十行 stderr 里翻，看不出是哪一步
+ *
+ * 输出形态统一是「▸ 先写标题 → 中间写明细 → ✓ 尾写总时间」，每一层都一样：
+ *
+ *   ▸ compile js
+ *     ▸ webpack
+ *       · bootstrap            1293 ms
+ *       ▸ make
+ *         · .js x31            1382 ms
+ *       ✓ make                 2346 ms
+ *     ✓ webpack                5178 ms
+ *   ✓ compile js               5432 ms
+ *
+ * 标题要等第一个明细到来时才打：没有明细的步骤（read project、write bin…）
+ * 仍然只有一行，不然每一步都变成「标题 + 时间」两行，通篇都是重复。
+ *
+ * 三个打印原语都挂在 step.child 上（调用方 compileJs 拿到的就是 child）：
+ *   child(name, fn)       包住一个同步/异步动作计时，打 level 1 的一行
+ *   child.title(d, name)  打标题 ▸，明细跟在它后面
+ *   child.detail(d, name, ms)  打一条**已经测好**的明细
+ *   child.total(d, name, ms)   打标题的收尾 ✓ 行
+ * title/detail/total 用来打印 webpack 内部那种「时间戳由子进程带回来」的数字，
+ * 只能在事后补打，没法包住 fn 去计时。
  */
 function makeStepTimer(log) {
-  return async function step(name, fn) {
+  // 当前正在跑的步骤。整条链是串行的，同一时刻只有一步
+  let current = null;
+
+  /**
+   * 一行耗时。depth 0 是主步骤（✓ read project），1 是 child（· manifest），
+   * 2 起是 webpack 内部的明细。
+   * 数字列默认固定在 25 列：2×depth + 2 个字符的符号位，名字补齐到 24 列，再空一格。
+   * width 是名字列宽的可选覆盖 —— webpack 逐文件明细的名字长短差很多，
+   * 固定 22 列会让最长的那些把数字挤到右边，由调用方给出统一的列宽。
+   */
+  const line = (depth, mark, name, ms, width) => {
+    const head = `${"  ".repeat(depth)}${mark} `;
+    const body = `${head}${name.padEnd(width ?? 24 - head.length)}`;
+    return ms === undefined || ms === null ? body.trimEnd() : `${body} ${String(ms).padStart(6)} ms`;
+  };
+
+  const ensureTitle = () => {
+    if (current && !current.titled) {
+      current.titled = true;
+      log(line(0, "▸", current.name));
+    }
+  };
+
+  const step = async function step(name, fn) {
     const t0 = Date.now();
+    current = { name, titled: false };
     try {
       const r = await fn();
-      log(`✓ ${name.padEnd(22)} ${String(Date.now() - t0).padStart(6)} ms`);
+      log(line(0, "✓", name, Date.now() - t0));
+      current = null;
       return r;
     } catch (e) {
-      log(`✗ ${name.padEnd(22)} ${String(Date.now() - t0).padStart(6)} ms  ${String(e.message).split("\n")[0]}`);
+      log(`${line(0, "✗", name, Date.now() - t0)}  ${String(e.message).split("\n")[0]}`);
+      current = null;
       throw new Error(`${name}: ${e.message}`, { cause: e });
     }
   };
+
+  const child = async function child(name, fn) {
+    ensureTitle();
+    const t0 = Date.now();
+    const r = await fn();
+    log(line(1, "·", name, Date.now() - t0));
+    return r;
+  };
+
+  child.title = (depth, name) => {
+    ensureTitle();
+    log(line(depth, "▸", name));
+  };
+
+  child.detail = (depth, name, ms, width) => {
+    if (ms === undefined || ms === null) return;
+    ensureTitle();
+    log(line(depth, "·", name, ms, width));
+  };
+
+  child.total = (depth, name, ms) => {
+    ensureTitle();
+    log(line(depth, "✓", name, ms));
+  };
+
+  step.child = child;
+  return step;
 }

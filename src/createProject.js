@@ -17,9 +17,11 @@ import { TEMPLATE_DIR } from "./renderTemplate.js";
  * 接了过去。
  *
  * 模板内置在 SDK 里而不是引用 apps/_empty：那个目录是本机的样本工程，
- * 换台机器、或者哪天清理过 apps/，create 就废了。模板一共 9 个文件 20 KB。
+ * 换台机器、或者哪天清理过 apps/，create 就废了。模板一共 9 个文件 14 KB。
+ * 签名材料的初态（cert/default.p12 + signing.config.js）不在这份模板里 ——
+ * 它是 initProject 的活，见那里的 writeSigningSeedIfEmpty。
  *
- * 复制完再走一遍 initProject —— hmlwsdk.config.js / hmlwsdk.build.js / build.config.js /
+ * 复制完再走一遍 initProject —— hmlwsdk.config.js / hmlwsdk-build.js / build.config.js /
  * cert/ / build/ / package.json 与 init 的产物完全一致，一份实现两处使用。
  * 模板里不带 build.config.js，那一步由 initProject 用 DEFAULT_SDK_VERSIONS 补。
  */
