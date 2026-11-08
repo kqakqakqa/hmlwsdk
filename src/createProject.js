@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { DEFAULT_SDK_DIR, buildConfigTemplate, initProject } from "./initProject.js";
+import { DEFAULT_SDK_DIR, initProject } from "./initProject.js";
 import { TEMPLATE_DIR } from "./renderTemplate.js";
 
 /**
@@ -19,23 +19,15 @@ import { TEMPLATE_DIR } from "./renderTemplate.js";
  * 模板内置在 SDK 里而不是引用 apps/_empty：那个目录是本机的样本工程，
  * 换台机器、或者哪天清理过 apps/，create 就废了。模板一共 9 个文件 20 KB。
  *
- * 复制完再走一遍 initProject —— 生成的 hmlwsdk.config.js / hmlwsdk.build.js /
+ * 复制完再走一遍 initProject —— hmlwsdk.config.js / hmlwsdk.build.js / build.config.js /
  * cert/ / build/ / package.json 与 init 的产物完全一致，一份实现两处使用。
- * build.config.js 先在这里写好，因为 initProject 要求它必须存在。
+ * 模板里不带 build.config.js，那一步由 initProject 用 DEFAULT_SDK_VERSIONS 补。
  */
 
 /** 模板在 SDK 根下，与 bin/ src/ doc/ 平级；常量定义在 renderTemplate.js，渲染模板也要用它 */
 export { TEMPLATE_DIR };
 
 export const TEMPLATE_NAME = "liteWearableEmpty";
-
-/**
- * 模板固定的 SDK 版本号，与 apps/_empty 工程相同
- *
- * 这两个值决定 config.json 的 app.apiVersion：compile → target，compatible → compatible。
- * 模板不随 create 的参数变 —— 要改版本就改工程里的 build.config.js。
- */
-const TEMPLATE_VERSIONS = { compileSdkVersion: 6, compatibleSdkVersion: 3 };
 
 /**
  * @param {object} [opts]
@@ -67,9 +59,6 @@ export function createProject(opts = {}) {
 
   const copied = copyTemplate(templateRoot, root);
   renameAppName(root, appName);
-
-  // 先写 build.config.js —— initProject 要求它必须存在
-  writeFileOnce(path.join(root, "build.config.js"), buildConfigTemplate(TEMPLATE_VERSIONS));
 
   log(`hmlwsdk create  ${root}`);
   log(`  template ${TEMPLATE_NAME} → ${copied.length} files, appName = ${appName}`);
@@ -146,9 +135,4 @@ function renameAppName(root, appName) {
 
   item.value = appName;
   fs.writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`);
-}
-
-function writeFileOnce(file, content) {
-  if (fs.existsSync(file)) return;
-  fs.writeFileSync(file, content);
 }

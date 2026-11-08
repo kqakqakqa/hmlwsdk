@@ -42,6 +42,8 @@ export const BUILD_CONFIG_NAME = "build.config.js";
  *   compatibleSdkVersion → app.apiVersion.compatible
  *
  * 缺文件或字段就报错，不猜默认值 —— 静默用错版本比直接失败更难查。
+ * 「缺文件」这条由 init 兜住：它会在工程里写一份默认 6 / 3 的 build.config.js，
+ * 所以这里报错时基本只意味着没跑过 init。
  * 早先这里还会回退去解析模块构建脚本里的 groovy 文本，那条路已经删了：
  * 工程带不带那套脚本对本 SDK 没有任何意义，build.config.js 是唯一来源。
  *
@@ -52,7 +54,7 @@ export async function readSdkVersions(root) {
   if (!fs.existsSync(configPath)) {
     throw new Error(
       `${configPath} is missing — it holds compileSdkVersion / compatibleSdkVersion\n` +
-        'run "hmlwsdk init" in the project root, or write that file by hand'
+        'run "hmlwsdk init" in the project root and it will write one (default 6 / 3)'
     );
   }
 

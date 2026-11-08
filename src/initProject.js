@@ -11,12 +11,13 @@ import { renderTemplate } from "./renderTemplate.js";
  *
  * 只加文件，不动原有结构：entry/ 原样保留。
  *
- * **前提是工程根已经有 build.config.js**（两个 SDK 版本号）。create 造出来的工程自带，
- * 老工程得自己写一份 —— 早先 init 会去解析 entry/build.gradle 把它推导出来，
- * 那条路已经删了。
+ * build.config.js（两个 SDK 版本号）缺就补一份，用 DEFAULT_SDK_VERSIONS。老工程多半没有
+ * 这个文件，报错让用户自己写太苛刻；但也不做「读的时候猜默认值」—— 文件必须真实落在
+ * 工程里，用户想改版本号有地方可改。
  *
  * 生成的东西（勾 = 进版本库）：
  *
+ *   build.config.js       ✓  compileSdkVersion / compatibleSdkVersion（缺才写，默认 6 / 3）
  *   hmlwsdk.config.js     ✗  hmlwsdk 在哪 + 用哪个 node（本机相关，被 .gitignore 忽略）
  *   hmlwsdk.build.js      ✓  项目入口，npm run build* 这四条 script 调它
  *   cert/.gitignore       ✓  忽略目录内一切（签名材料 + 含明文密码的 signing.config.js）
@@ -24,10 +25,10 @@ import { renderTemplate } from "./renderTemplate.js";
  *   package.json          ✓  补 "type": "module" 和四条 scripts（名字与 CLI 命令一致）
  *   .gitignore            ✓  追加 /hmlwsdk.config.js
  *
- * 上面这四个文件的内容不写在这里 —— 它们是给用户读、让用户改的源码，
+ * 上面那几个文件的内容不写在这里 —— 它们是给用户读、让用户改的源码，
  * 原样放在 templates/projectInit/ 下，由 renderTemplate 填占位符。
- * build.config.js 与 signing.config.js 也走同一套模板，用的人分别是
- * createProject（这里导出 buildConfigTemplate）和 readSigningConfig。
+ * build.config.js 与 signing.config.js 也走同一套模板，用的人分别是 init 自己
+ * （缺文件时用 DEFAULT_SDK_VERSIONS 渲染）和 readSigningConfig。
  *
  * 幂等：已存在的文件不覆盖，只补缺的。可以随时重跑。
  *
@@ -37,6 +38,14 @@ import { renderTemplate } from "./renderTemplate.js";
  */
 
 export const DEFAULT_SDK_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 补 build.config.js 时用的默认版本号（api6 / 兼容 api3）
+ *
+ * 只在工程里没有这个文件时才用，写进去之后就是工程自己的值，随便改。
+ * create 走同一个 initProject，所以新工程和 init 出来的老工程拿到的是同一份默认值。
+ */
+export const DEFAULT_SDK_VERSIONS = { compileSdkVersion: 6, compatibleSdkVersion: 3 };
 
 /**
  * 工程 package.json 里的四条 script
@@ -96,9 +105,8 @@ export function initProject(opts = {}) {
     throw new Error(`${sdkDir} does not look like hmlwsdk: ${sdkEntry} is not there`);
   }
 
-  // 前提先验，别先落一地文件才发现缺版本号
-  requireBuildConfig(root);
-
+  // 版本号文件缺就补一份，别让首次 init 因为缺它直接退出
+  writeIfMissing(path.join(root, BUILD_CONFIG_NAME), buildConfigTemplate(DEFAULT_SDK_VERSIONS), { root, created, skipped });
   writeIfMissing(path.join(root, "hmlwsdk.config.js"), projectConfigTemplate(sdkDir, node), { root, created, skipped });
   writeIfMissing(path.join(root, "hmlwsdk.build.js"), renderTemplate("projectInit/hmlwsdk.build.js"), { root, created, skipped });
   writeIfMissing(path.join(root, "cert", ".gitignore"), renderTemplate(IGNORE_ALL_TEMPLATE), { root, created, skipped });
@@ -186,27 +194,6 @@ function writeIfMissing(file, content, { root, created, skipped }) {
   created.push(rel);
 }
 
-/**
- * 工程根必须有 build.config.js，没有就说清楚该怎么补
- *
- * 不推导、不猜默认值：两个版本号决定 config.json 的 apiVersion，猜错比失败更难查。
- * 提示里给的 6 / 3 是 api6 的常见组合，只是让人有东西可抄，不是默认值。
- */
-function requireBuildConfig(root) {
-  const file = path.join(root, BUILD_CONFIG_NAME);
-  if (fs.existsSync(file)) return;
-
-  throw new Error(
-    `${file} is missing — it holds compileSdkVersion / compatibleSdkVersion\n\n` +
-      "write it yourself, for example:\n\n" +
-      "  export default {\n" +
-      "    compileSdkVersion: 6,\n" +
-      "    compatibleSdkVersion: 3\n" +
-      "  };\n\n" +
-      'or run "hmlwsdk create <dir>" to start from a template that already has it'
-  );
-}
-
 /** 路径写进 .js 文件里，统一正斜杠 —— 反斜杠在字符串里要转义，读起来也乱 */
 const toPosix = (p) => p.replace(/\\/g, "/");
 
@@ -218,7 +205,7 @@ function projectConfigTemplate(sdkDir, node) {
 }
 
 /**
- * build.config.js 的内容 —— 现在只有 createProject 用它（init 不再推导版本号）
+ * build.config.js 的内容 —— 缺文件时由 init 用 DEFAULT_SDK_VERSIONS 渲染
  */
 export function buildConfigTemplate({ compileSdkVersion, compatibleSdkVersion }) {
   return renderTemplate("projectInit/build.config.js", { compileSdkVersion, compatibleSdkVersion });
