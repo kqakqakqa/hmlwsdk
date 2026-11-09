@@ -95,8 +95,7 @@ export async function compileJs(opts) {
       moduleRoot,
       buildDir,
       manifestPath,
-      // 用哪个 node 跑 webpack。给了就用（来自 hmlwsdk.config.js 的 node），
-      // 没给由 runWebpack 自己探（process.execPath 优先）
+      // 用哪个 node 跑 webpack。CLI 不传，由 runWebpack 自己探（process.execPath）
       node: opts.node,
       // resources 下的 png 也要转成 .bin，靠 img2bin 的 iconPath 环境变量。
       // 资源编译没跑过时这个目录不存在，就不传。

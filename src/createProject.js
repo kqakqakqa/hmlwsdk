@@ -21,8 +21,8 @@ import { TEMPLATE_DIR } from "./renderTemplate.js";
  * 签名材料的初态（cert/default.p12 + signing.config.js）不在这份模板里 ——
  * 它是 initProject 的活，见那里的 writeSigningSeedIfEmpty。
  *
- * 复制完再走一遍 initProject —— hmlwsdk.config.js / hmlwsdk-build.js / build.config.js /
- * cert/ / build/ / package.json 与 init 的产物完全一致，一份实现两处使用。
+ * 复制完再走一遍 initProject —— build.config.js / cert/ / build/ / package.json 与
+ * init 的产物完全一致，一份实现两处使用。
  * 模板里不带 build.config.js，那一步由 initProject 用 DEFAULT_SDK_VERSIONS 补。
  */
 
@@ -35,7 +35,6 @@ export const TEMPLATE_NAME = "liteWearableEmpty";
  * @param {object} [opts]
  * @param {string} [opts.dir]    目标目录，省略用 cwd
  * @param {string} [opts.sdkDir] 本机 hmlwsdk 的路径，省略用本模块所在的那份
- * @param {string} [opts.node]   node 的路径，省略用 process.execPath
  * @param {(line:string)=>void} [opts.log]
  * @returns {{root:string, copied:string[], created:string[], skipped:string[], updated:string[]}}
  */
@@ -67,7 +66,7 @@ export function createProject(opts = {}) {
   for (const f of copied) log(`  ✓ ${f}`);
 
   // 接着把它初始化成能一条命令出包的工程（init 会打自己那一份日志）
-  const result = initProject({ dir: root, sdkDir, node: opts.node });
+  const result = initProject({ dir: root, sdkDir });
 
   return { root, copied, ...result };
 }

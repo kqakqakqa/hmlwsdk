@@ -4,11 +4,11 @@ import path from "path";
 import { createHash } from "crypto";
 
 import { readProject } from "./readProject.js";
-import { mergeProfile } from "./processConfig.js";
+import { mergeProfile, stringifyConfig } from "./processConfig.js";
 import { compileResources } from "./compileResources.js";
 import { compileJs } from "./compileJs.js";
 import { assembleAssets } from "./assembleAssets.js";
-import { collectFiles } from "./collectFiles.js";
+import { collectFiles, entryPath } from "./collectFiles.js";
 import { writeBin } from "./readWriteBin.js";
 import { packBinHap, packTreeHap } from "./packHap.js";
 import { packApp } from "./packApp.js";
@@ -17,87 +17,110 @@ import { prepareSigning, signBin } from "./sign/index.js";
 import { readSigningConfig, CERT_DIR } from "./readSigningConfig.js";
 
 /**
- * 整条出包链
+ * 整条出包链 —— 一次跑完，能出的产物全落盘
  *
- *   读工程 → 加工 config ┬─ 编译资源 ─┬─ 组装 source/ → 写 .bin ─┬─ 签 .bin ─┐
- *                        └─ 编译 JS ──┘                          │          ├→ 打 hap（.bin 形态）→ 签 hap
- *                                                               └→ 打 hap（文件树）→ 打 .app → 签 .app
+ *   读工程 → 加工 config ┬─ 编译资源 ─┬─ 定型 source/ → 写 .bin（只在内存，p7b 身份）
+ *                        └─ 编译 JS ──┘                            ├→ 打 hap（文件树）→ 打 .app → 落 <bundleName>.app
+ *                                                                  ├→ 签 .bin → 装进 .bin 形态的 hap
+ *                                                                  │            → 落 <bundleName>-signed.hap
+ *                                                                  └→ 签 .app → 落 <bundleName>-signed.app
  *
- * 没有任务表、没有依赖图、没有跨步骤的 context 对象 —— 整条链 6~10 步，
- * 顺序写出来一眼能看完。
+ * 没有任务表、没有依赖图、没有跨步骤的 context 对象 —— 整条链 8~12 步，
+ * 顺序写出来一眼能看完。早先按 target 分四条命令（buildBin / buildApp /
+ * buildSignedHap / buildSignedApp），一次只出一份；现在一条 build 全出 ——
+ * 末尾那几步打包加起来十几毫秒，分段跑没有收益。
  *
- * target 决定跑到哪一步：
- *   bin        出 .bin                           （给了签名配置就顺带签）
- *   signedHap  出「里面那个 .bin 已签名」的 hap
- *   app        出 .app                           （给了签名配置就顺带签）
- *   signedApp  出签名后的 .app
- *
- * 落盘的只有一份，内容是哪个由 target 决定 ——
- *   build/<bundleName>-<moduleName>[-signed].bin   target=bin
- *   build/<bundleName>[-signed].hap                target=signedHap
- *   build/<bundleName>[-signed].app                target=app / signedApp
+ * 三份产物（cert/ 里没 p7b 时只有第一份）：
+ *   build/<bundleName>.app                 未签的 .app，整个应用
+ *   build/<bundleName>-signed.hap          里面那个 .bin 已签，设备直接装的就是它
+ *   build/<bundleName>-signed.app          签过的 .app，上架用
  * 签过的才带 -signed，所以文件名本身就说明这个包能不能直接装表。
- * 名字带不带模块名看「这份产物代表谁」，不看后缀：.bin 是模块级产物，带模块名；
- * `.bin` 形态的 hap 和 `.app` 装的都是整个应用，所以只写包名。
- * 容器里的条目不算产物名 —— `.bin` 形态 hap 里那个唯一条目、`.app` 里那份文件树 hap
- * 都还是模块级的，名字照样带模块名。
- * 中间产物（.bin、两种 hap、pack.info）全在内存里往后传，一行都不落盘。
  *
- * 必须落盘的只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
+ * **未签的 .bin 不落盘。** 它唯一的去处就是签完塞进 -signed.hap —— 早先额外出过一份
+ * build/<bundleName>-<moduleName>.bin，可它不是设备能装的东西（未签 = 装不上），
+ * 落一份只是让人分不清该拿哪个。现在它只作为内存里的 Buffer 存在（unsignedBinBuf）。
+ *
+ * **写 .bin 时就写成 p7b 的身份。** 既然它只服务签名那一路，就没有「先写工程身份、
+ * 再读回来改一遍」的道理：write bin 那一步直接把头与 config 的 bundleName 取 p7b 的
+ * bundle-name、version.code 置 0。但**产物文件名仍用工程的 bundleName**：文件名要能
+ * 一眼对回是哪个工程，包内字段要满足设备验签。
+ * .app 那边一律不动 —— 里面那份 hap 的 bundleName / version 都是工程原值。因为
+ * `packTreeHap` 的 config.json 由参数重写、不读磁盘那份，source/config.json 保持工程身份。
+ *
+ * cert/ 里凑不齐签名材料时**不报错**：只落未签的 .app，再打一行警告。
+ * cert/default.p12 是 init 白送的，p7b 却只能从 AGC 申请，所以「有私钥没 p7b」
+ * 是新建工程的常态 —— 这时候一个文件都不出才是坑。
+ *
+ * 写完就结束，**不清 `build/`** —— 同名的旧文件被覆盖，不同名的原样留着。
+ * 要清理请自己清 `build/`，构建不代劳。
+ * 名字带不带模块名看「这份产物代表谁」，不看后缀：hap 里那个 .bin 条目、.app 里那份
+ * 文件树 hap 都是模块级产物，名字带模块名（<bundleName>-<moduleName>）；.app 装的
+ * 是整个应用，只写包名。
+ *
+ * 必须落盘的中间文件只有 webpack 那几个 —— 它是独立进程，只能靠文件系统交接。
  * 这些都放在系统临时目录（work），跑完整个删掉：
  *   work/R.txt                     资源 id 表，只用来回填 config
  *   work/manifest/<组件>/           webpack 的输入
  *   work/source/                   .bin / hap 的原料树（config.json + assets/）
  *   work/pack/                     pack.info（同时打进 .app，文件这份是副产物）
- * work 放临时目录而不是工程里，工程 build/ 下就只剩那一份能直接用的产物。
+ * work 放临时目录而不是工程里，工程 build/ 下就只有那几份产物。
  *
- * 签名材料统一从 <工程>/cert/ 读（见 readSigningConfig.js），CLI 不再传 p7b/p12。
- * 规则是「有就签、没有就不签」；target 是 signed* 时则要求必须有材料，缺了直接报错。
+ * 签名材料统一从 <工程>/cert/ 读（见 readSigningConfig.js），CLI 不传 p7b/p12。
  *
  * 中间态一律用变量传，不落盘：资源直接写进 source/assets/entry（没有 res/ 中间目录），
  * .bin 和 hap 的 Buffer 留在内存里给下一步用，不会写完再读回来。
- * 必须落盘的只有三类 —— webpack 的输入 manifest、webpack 的输出目录、最终产物，
- * 前两个是因为 webpack 是独立进程，只能靠文件系统交接。
  */
 
-export const TARGETS = ["bin", "signedHap", "app", "signedApp"];
+/**
+ * 老版本 init 生成过、现在一个都不再读取的文件
+ *
+ * hmlwsdk-build.js 是转发脚本（早先还叫 hmlwsdk.build.js），hmlwsdk.config.js 存
+ * sdkDir + node。这两样都被「hmlwsdk 作为 devDependency + npm script 直接调命令」取代了。
+ * 检测它们是为了让用老工程的人知道该重新 init，而不是对着一个改了也没反应的文件发愁。
+ */
+const STALE_PROJECT_FILES = ["hmlwsdk-build.js", "hmlwsdk.build.js", "hmlwsdk.config.js"];
 
 /**
  * @param {object} opts
  * @param {string} [opts.projectDir] 工程目录（含 entry/ 的那一层），省略用 cwd
- * @param {string} opts.target        TARGETS 里的一个
  * @param {string} [opts.work]        scratch 目录，默认系统临时目录下按工程区分的一个子目录
- * @param {string} [opts.node]        跑 webpack 的 node，默认当前进程（正常从 hmlwsdk.config.js 来）
+ * @param {string} [opts.node]        跑 webpack 的 node，默认当前进程
  * @param {object} [opts.signingConfig] 显式给签名材料，省略则读 <工程>/cert/
  * @param {(line:string)=>void} [opts.log]
- * @returns {Promise<{target:string, work:string, artifact:string}>} 
+ * @returns {Promise<{work:string, artifacts:string[]}>} artifacts 是这一轮落盘的全部产物路径
  */
 export async function build(opts) {
-  if (!TARGETS.includes(opts.target)) {
-    throw new Error(`unknown target: ${opts.target} (expected one of ${TARGETS.join(", ")})`);
-  }
-
   const log = opts.log ?? console.log;
   const step = makeStepTimer(log);
 
   // ── 读工程 + 签名材料 ────────────────────────────────────────────────
   const project = await step("read project", () => readProject(opts.projectDir));
 
+  // 老版本 init 往工程里放过两个文件：hmlwsdk-build.js（转发脚本）和 hmlwsdk.config.js
+  // （sdkDir + node）。现在一个都不再被读取，但留着会让人以为改它们有用，或者以为
+  // 工程已经按新方式初始化过了 —— 尤其是 package.json 里那几条旧 script 还指着它们。
+  const staleFiles = STALE_PROJECT_FILES.filter((f) => fs.existsSync(path.join(project.root, f)));
+  if (staleFiles.length > 0) {
+    log(
+      `! this project was set up by an older hmlwsdk (${staleFiles.join(", ")} still here). ` +
+        'run "hmlwsdk init" to refresh package.json, then delete those files'
+    );
+  }
+
   // 签名材料从 cert/ 读，很快（就几个文件），放在 webpack 之前 ——
   // 这样「命令要求签名但 cert/ 是空的」立刻失败，不用等 5 秒编译完才报。
   const signingConfig =
     opts.signingConfig ?? (await step("read signing", () => readSigningConfig(project.root)));
 
-  // 说的是「凑不齐可用配置」而不是「没有材料」：init 会把 cert/default.p12 放进去，
-  // 常见情形是私钥已经在、只差 p7b，报「no signing material」会让人以为目录是空的。
-  if (opts.target.startsWith("signed") && !signingConfig) {
-    throw new Error(
-      `${opts.target} produces a signed artifact, but ${path.join(project.root, CERT_DIR)} has no usable signing config — ` +
-        "it needs a .p7b profile plus a .p12 or PKCS#8 .pem key. " +
-        "A profile is issued per app by AppGallery Connect, it cannot be generated locally; " +
-        "the p12 password is tried against the file name when cert/signing.config.js does not set one"
-    );
-  }
+  // 解析成完整材料（p7b / 私钥 / 证书链），理由同上：密码错、证书链不全这类问题
+  // 不该等编译完才暴露。写 .bin 那一步要用 p7b 的 bundle-name，所以它必须在这之前。
+  // 没有签名材料时是 null —— 那种情况下 .bin 根本不落盘，也就不需要这个名字。
+  const signing = signingConfig
+    ? await step("read signing material", () => prepareSigning(signingConfig))
+    : null;
+
+  // 这里**不检查签名材料全不全**：缺 p7b 时只是那两份签名产物出不来，未签的
+  // .app 照样能出 —— 报错退出等于把能用的东西一起拦掉。缺什么在末尾统一提示。
 
   // webpack 是独立进程，只能靠文件系统交接，所以必须有这么一份 scratch。
   // 放系统临时目录而不是工程里 —— 工程 build/ 下只该有命令承诺的那一份产物。
@@ -148,7 +171,7 @@ export async function build(opts) {
       config: merged,
       work,
       sourceRoot,
-      // 用哪个 node 跑 webpack：来自 hmlwsdk.config.js，没写就是当前进程
+      // 用哪个 node 跑 webpack：CLI 不传，就是当前进程
       node: opts.node,
       iconDir: path.join(assetsEntry, "resources"),
       // 这一步动辄 5 s 以上，内部再分四段计时（manifest / webpack / clean / snapshot）
@@ -167,61 +190,52 @@ export async function build(opts) {
   );
 
   // ── 写 .bin ─────────────────────────────────────────────────────────
-  // 只在内存里出 Buffer：它要么是最终产物，要么是 hap 的内容，两种都不需要
-  // 中间那份文件。
-  const unsignedBinBuf = await step("write bin", () =>
-    writeBin({ bundleName: config.app.bundleName, entries: collectFiles(sourceRoot) })
-  );
+  // 只在内存里出 Buffer，唯一的去处是签名后的 hap（未签的不落盘）。所以这里**直接写成
+  // 签 hap 要的那份**：包内身份就是 p7b 的，省掉「先写工程身份、再读回来改一遍」。
+  // .app 那侧不受影响 —— packTreeHap 的 config.json 用传进去的 config 参数重写，
+  // 不读磁盘这份，所以 source/config.json 仍是工程原值。
+  const unsignedBinBuf = await step("write bin", () => {
+    const entries = collectFiles(sourceRoot);
+
+    // 换壳：设备验签比的是 p7b 里的 bundle-name 与包内 bundleName，所以包内身份要换成
+    // p7b 的值，version.code 一并置 0（依据见 hap-sign-utils/sign-app-to-hap.js 第 33-38 行）。
+    // 必须在 writeBin 之前改 —— 签名摘要覆盖的是改后的字节。
+    // version.name 不动；assets 里各组件 manifest.json 的 appID 也不动（参考实现同样只碰
+    // config.json 和 .bin 头，设备装包读的是 config.json，这条没上真机验证过）。
+    if (signing) {
+      const cfgEntry = entries.find((e) => entryPath(e) === "config.json");
+      if (!cfgEntry) throw new Error("source/config.json is missing, cannot write the .bin");
+
+      const cfg = JSON.parse(cfgEntry.content.toString("utf8"));
+      cfg.app.bundleName = signing.profile.bundleName;
+      cfg.app.version.code = 0;
+      // 重排必须走 stringifyConfig —— 打进包的 config.json 就是它写的排版
+      // （4 空格缩进、非 ASCII 转义），直接用 JSON.stringify 会让格式变样。
+      cfgEntry.content = Buffer.from(stringifyConfig(cfg));
+    }
+
+    return writeBin({
+      bundleName: signing?.profile.bundleName ?? config.app.bundleName,
+      entries
+    });
+  });
 
   // ── 产物命名 ────────────────────────────────────────────────────────
-  // 名字带不带模块名，看「这份产物代表谁」：
-  //   模块级    build/<bundleName>-<moduleName>[-signed].bin   只有 .bin
-  //   整个应用  build/<bundleName>[-signed].hap               .bin 形态的 hap
-  //   整个应用  build/<bundleName>[-signed].app               .app
+  // binStem 只用于容器内部的条目名：
+  //   -signed.hap 里的 .bin 条目   <bundleName>-<moduleName>-signed.bin
+  //   .app 里那份文件树 hap       <bundleName>-<moduleName>.hap
+  //   pack.info 的 packages[].name <bundleName>-<moduleName>
+  // 落盘的文件名只有 appStem 一套，见 publish()。
   // moduleName 取 config 里的 distro.moduleName（DevEco 生成的工程都有，值就是 entry）。
-  // 容器里的条目不算产物名：.bin 形态 hap 里那个唯一条目、.app 里那份文件树 hap
-  // 都是模块级的，名字照样带模块名，由下面的 binForHapName 和 packApp 那一步决定。
   const moduleName = config.module?.distro?.moduleName ?? "entry";
   const binStem = `${config.app.bundleName}-${moduleName}`;
   const appStem = config.app.bundleName;
 
-  // cert/ 里没材料时不签，unsigned 直接当 signed 往下传
-  let binForHap = unsignedBinBuf;
-  let binForHapName = `${binStem}.bin`;
-  if (signingConfig) {
-    binForHapName = `${binStem}-signed.bin`;
-    binForHap = await step("sign bin", () => signBinBuffer(unsignedBinBuf, signingConfig));
-  }
+  // 这一轮落盘的所有产物，顺序就是它们被写出来的顺序
+  const artifacts = [];
 
-  // 收尾：把唯一一份产物放到 build/ 根、清掉 scratch、返回它的路径。
-  // 四个 target 都从这里出去，所以「只落一份」这件事只有一个实现点。
-  const done = (buf, ext) => {
-    // 只有 .bin 是模块级；.hap（.bin 形态）和 .app 装的都是整个应用
-    const stem = ext === ".bin" ? binStem : appStem;
-    const artifact = publish(buf, outRoot, stem, ext, Boolean(signingConfig), [binStem, appStem]);
-
-    if (!signingConfig) {
-      log(`! no usable signing config in ${CERT_DIR}/, ${path.basename(artifact)} is unsigned and cannot be installed on a watch`);
-    }
-    cleanWork(work);
-    return { target: opts.target, work, artifact };
-  };
-
-  if (opts.target === "bin") return done(binForHap, ".bin");
-
-  // ── .bin 形态的 hap ─────────────────────────────────────────────────
-  // 设备直接装的就是这种（里面只有那一个 .bin）。它进不了 .app，所以只有
-  // target=signedHap 时才是产物，其它 target 下打完就扔 —— Buffer 而已。
-  // 原来的实现是「打成 hap → 拆开读出 .bin → 判断已签 → 装回去」，那个拆包
-  // 一步纯属白做：hap 就是把 .bin 塞进 zip，Buffer 直接拿来打就行。
-  const binHap = await step("pack bin hap", () => packBinHap(binForHap, binForHapName));
-
-  if (opts.target === "signedHap") {
-    // 不往 hap 的 zip 里插 "HAP Sig Block 42" —— 设备验的是 .bin 自己的签名块，
-    // 那层块没有验证价值。
-    return done(binHap, ".hap");
-  }
-
+  // ── 未签的那份 ──────────────────────────────────────────────────────
+  // 只剩 .app：未签的 .bin 装不上表，落一份只会让人拿错包。
   // 文件树形态：.bin 形态进不了 .app（PackageApp 会过滤文件名含 -bin- 的）
   const treeHapBuf = await step("pack tree hap", () => packTreeHap(sourceRoot, config));
 
@@ -232,40 +246,64 @@ export async function build(opts) {
     "pack app",
     () => packApp({ outDir: packDir, hapBuf: treeHapBuf, hapName: `${binStem}.hap`, config }).appBuf
   );
+  artifacts.push(publish(appBuf, outRoot, appStem, ".app", false));
 
-  // 两个停止点 × cert/ 里有没有签名材料，所以 buildApp 有材料也会往下签，
-  // 与 buildBin 的行为一致
-  const finalApp = signingConfig
-    ? await step("sign app", () => signApp({ appBuf, signingConfig }))
-    : appBuf;
+  // ── 签名的两份（cert/ 里凑不齐材料就没有）───────────────────────────
+  if (signing) {
+    // 签的就是上面那份已经换好身份的 .bin —— 顺序不能颠倒：换在签名之后等于没换，
+    // 设备仍按旧 bundleName 判。
+    // 文件名仍用工程的 bundleName（binStem / appStem 都是工程值），方便对回是哪个工程。
+    const signedBin = await step("sign bin", () =>
+      signBin({
+        unsignedBin: unsignedBinBuf,
+        p7b: signing.p7b,
+        keyPem: signing.keyPem,
+        certPems: signing.certPems,
+        signTime: signing.signTime
+      })
+    );
+    // .bin 形态的 hap：设备直接装的就是它（里面只有那一个 .bin）。
+    // 早先的实现是「打成 hap → 拆开读出 .bin → 判断已签 → 装回去」，那个拆包
+    // 一步纯属白做：hap 就是把 .bin 塞进 zip，Buffer 直接拿来打就行。
+    // 不往 hap 的 zip 里插 "HAP Sig Block 42" —— 设备验的是 .bin 自己的签名块，
+    // 那层块没有验证价值。
+    const binHap = await step("pack bin hap", () =>
+      packBinHap(signedBin, `${binStem}-signed.bin`)
+    );
+    artifacts.push(publish(binHap, outRoot, appStem, ".hap", true));
 
-  return done(finalApp, ".app");
+    // .app 的签名在它自己的 zip 层（HAP Sig Block 42），所以签的是打好包的
+    // appBuf，未签那份照旧留着 —— 两份内容只差签名块。
+    // 里面那份 hap 一律是工程原貌（bundleName / version 都不改），换壳只针对 hap。
+    const signedApp = await step("sign app", () => signApp({ appBuf, signingConfig }));
+    artifacts.push(publish(signedApp, outRoot, appStem, ".app", true));
+  } else {
+    log(
+      `! no usable signing config in ${CERT_DIR}/ — only the unsigned .app was written. ` +
+        "the signed hap / app need a .p7b profile, which is issued per app by AppGallery Connect and cannot be generated locally"
+    );
+  }
+
+  cleanWork(work);
+  return { work, artifacts };
 }
 
 /**
- * 把唯一一份产物写到 <工程>/build/ 根
+ * 把一份产物写到 <工程>/build/ 根，返回它的完整路径
  *
- * 文件名是 <stem>[-signed]<ext>。stem 有两套（见 build 里「产物命名」那一段）：
- * 模块级的 .bin 是 <bundleName>-<moduleName>，.bin 形态的 hap 和 .app 是 <bundleName>。
+ * 文件名是 <stem>[-signed]<ext>，stem 只有一套：工程的 bundleName。
+ * 容器内部的条目名另有一套（带 -<moduleName>，见 build 里「产物命名」那一段），
+ * 那个由 packBinHap / packApp 决定，与本函数无关。
+ * 一轮构建调它 1~3 次，每次一份。
  *
- * 中间产物一个都不留，所以这里不需要「挑哪个是给人用的」—— 进来的就是答案。
- * 顺手删掉其它形态（3 种后缀 × 签/未签两种）：那是上一次别的 target、
- * 或者 cert/ 里材料变了留下的旧包，留着会让人装错。
- * 清理要把两套 stem 一起扫 —— 只按当前 stem 删的话，上一次 .app 用的是另一套名字，
- * 那份旧包就永远没人删，而它的名字跟新产物只差一个模块名，装的时候最容易混淆。
+ * **只写这一份，别的什么都不删** —— 同名的旧文件被覆盖，不同名的原样留着。
+ * 早先这里会跨两套 stem 扫掉「其它形态」（3 种后缀 × 签/未签），理由是留着分不清
+ * 哪个是刚出的；代价是重构建就把上一次出的包删了。现在由使用者自己清 `build/`。
  */
-function publish(buf, outRoot, stem, ext, signed, staleStems) {
+function publish(buf, outRoot, stem, ext, signed) {
   const name = `${stem}${signed ? "-signed" : ""}${ext}`;
   const dest = path.join(outRoot, name);
   fs.mkdirSync(outRoot, { recursive: true });
-  for (const s of staleStems) {
-    for (const otherExt of [".app", ".hap", ".bin"]) {
-      for (const otherSign of ["", "-signed"]) {
-        const other = `${s}${otherSign}${otherExt}`;
-        if (other !== name) fs.rmSync(path.join(outRoot, other), { force: true });
-      }
-    }
-  }
   fs.writeFileSync(dest, buf);
   return dest;
 }
@@ -292,22 +330,6 @@ function workKey(projectRoot) {
  */
 function cleanWork(work) {
   fs.rmSync(work, { recursive: true, force: true });
-}
-
-/**
- * 给 .bin 签名，返回签名后的 Buffer
- * 签名格式见 sign/signBin.js
- */
-function signBinBuffer(unsignedBuf, signingConfig) {
-  const signing = prepareSigning(signingConfig);
-
-  return signBin({
-    unsignedBin: unsignedBuf,
-    p7b: signing.p7b,
-    keyPem: signing.keyPem,
-    certPems: signing.certPems,
-    signTime: signing.signTime
-  });
 }
 
 /**

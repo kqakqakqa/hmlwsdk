@@ -10,14 +10,11 @@ import { readProjectConfig } from "../src/readProjectConfig.js";
 /**
  * hmlwsdk 命令行入口
  *
- *   hmlwsdk create          [新工程目录]   ← 造一个新工程（省略就在 cwd 造）
- *   hmlwsdk init            [工程目录]
- *   hmlwsdk buildBin        [工程目录]
- *   hmlwsdk buildApp        [工程目录]
- *   hmlwsdk buildSignedHap  [工程目录]
- *   hmlwsdk buildSignedApp  [工程目录]
+ *   hmlwsdk create  [新工程目录]   ← 造一个新工程（省略就在 cwd 造）
+ *   hmlwsdk init    [工程目录]
+ *   hmlwsdk build   [工程目录]
  *
- * init / build* 的工程目录可以省略 —— 省略时从 cwd 向上找含 entry/src/main/config.json
+ * init / build 的工程目录可以省略 —— 省略时从 cwd 向上找含 entry/src/main/config.json
  * 的那一层，所以在工程里的任何子目录下都能直接跑。
  *
  * create 的目录参数是**字面目标路径**，不是「从哪儿开始往上找」：它要在那里新建
@@ -28,19 +25,15 @@ import { readProjectConfig } from "../src/readProjectConfig.js";
  *   cert/*.p7b + cert/*.p12 或 *.pem   名字唯一时直接丢进去就完事
  *   cert/signing.config.js             自动发现的结果回写在这里，也可手写
  *
- * 四条 build 命令：
- *   buildBin        出 .bin
- *   buildApp        出 .app，cert/ 有材料就签
- *   buildSignedHap  出「里面那个 .bin 已签名」的 hap，要求 cert/ 有材料
- *   buildSignedApp  出签名后的 .app，要求 cert/ 有材料
- *
- * 最终产物只有一份，落在 <工程>/build/ 根。带不带模块名看这份产物代表谁：
- *   buildBin        build/<bundleName>-<moduleName>.bin   模块级
- *   buildApp        build/<bundleName>.app                整个应用
- *   buildSignedHap  build/<bundleName>.hap                整个应用
- *   buildSignedApp  build/<bundleName>.app                整个应用
+ * build 一次出三份产物，全落在 <工程>/build/ 根：
+ *   <bundleName>.app                  未签的 .app，整个应用
+ *   <bundleName>-signed.hap           里面那个 .bin 已签名，设备直接装的就是它
+ *   <bundleName>-signed.app           签过名的 .app，上架用
+ * 后两份要 cert/ 里有 p7b 才出得来 —— 缺材料时不报错，只落第一份并打一行警告。
  * 签过的在扩展名前加 -signed。
- * 中间产物（.bin、两种 hap、pack.info）不落盘，只在内存里往后传。
+ * 未签的 .bin 不落盘，中间产物（未签 hap、pack.info）也只在内存里往后传。
+ * 写 .bin 时就直接写成 p7b 的身份：包内 bundleName 用 p7b 里的值、version.code 置 0，
+ * 但产物文件名仍用工程的 bundleName；.app 那两份的包内字段保持工程原值。
  */
 
 /** 本文件在 <SDK>/bin 下，往上一级就是 SDK 根 */
@@ -49,35 +42,30 @@ const SDK_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const args = process.argv.slice(2);
 
 /**
- * 命令名 → build() 的 target
+ * 命令名 → 要做的事
  *
- * 两个 signed* 承诺出签名产物，cert/ 里没材料时 build() 直接报错（静默退回
- * unsigned 是坑）；另外两条是「有材料就签」。
+ * 没有 target 这一层了：build 一条跑完整条链，能出的产物全出。
+ * 早先有 buildBin / buildApp / buildSignedHap / buildSignedApp 四条，
+ * 末尾几步打包加起来才十几毫秒，分成四条只是让人多记四个名字。
  */
 const COMMANDS = {
   create: {},
   init: {},
-  buildBin: { target: "bin" },
-  buildApp: { target: "app" },
-  buildSignedHap: { target: "signedHap" },
-  buildSignedApp: { target: "signedApp" }
+  build: {}
 };
 
 function printUsage() {
   console.error("usage: hmlwsdk <command> [project-dir]");
   console.error(`commands: ${Object.keys(COMMANDS).join("  ")}`);
-  console.error("  create           scaffold a new project from the built-in template (the dir arg is the literal target path, defaults to cwd)");
-  console.error("  init             turn a project into one-command builds (creates config / cert / build)");
-  console.error("  buildBin         .bin");
-  console.error("  buildApp         .app, signed when cert/ has material");
-  console.error("  buildSignedHap   the hap whose inner .bin is signed (requires material in cert/)");
-  console.error("  buildSignedApp   the signed .app (requires material in cert/)");
+  console.error("  create   scaffold a new project from the built-in template (the dir arg is the literal target path, defaults to cwd)");
+  console.error("  init     turn a project into one-command builds (creates config / cert / build)");
+  console.error("  build    build everything: .app, and the signed hap / app when cert/ has material");
   console.error("");
-  console.error("project-dir may be omitted for init / build*: it walks up from cwd to the level holding entry/src/main/config.json");
+  console.error("project-dir may be omitted for init / build: it walks up from cwd to the level holding entry/src/main/config.json");
   console.error("project-dir may be omitted for create: it builds in cwd, which must be empty apart from dot entries");
   console.error("example: hmlwsdk create myapp    scaffold a new project into ./myapp");
   console.error("         hmlwsdk init            existing project: run once at the project root");
-  console.error("         hmlwsdk buildApp        run any time afterwards, signing material comes from cert/");
+  console.error("         hmlwsdk build           run any time afterwards, signing material comes from cert/");
 }
 
 const command = args[0];
@@ -101,9 +89,8 @@ try {
   } else if (command === "init") {
     initProject({ dir: projectArg, sdkDir: SDK_DIR });
   } else {
-    // 先读 hmlwsdk.config.js：拿工程根和该用哪个 node（缺失时这里就会给出人话提示）
-    const config = await readProjectConfig(projectArg);
-    const outputs = await build({ projectDir: config.root, target: spec.target, node: config.node });
+    const root = readProjectConfig(projectArg);
+    const outputs = await build({ projectDir: root });
     printOutputs(outputs);
   }
 } catch (e) {
@@ -112,11 +99,12 @@ try {
 }
 
 /**
- * 打印那一份产物
+ * 打印这一轮落盘的产物
  *
- * build() 现在只落一个文件，所以这里就一行 —— 早先它把 outputs 里每条路径都
- * 列出来，六行里有四行是中间产物，看着像生成了六个包。
+ * 一条 build 出 1~3 份，按落盘顺序列出来。`cert/` 里没有 p7b 时只有那份未签 .app ——
+ * 少的那两份上面已经打过一行警告，这里不重复解释。
  */
 function printOutputs(outputs) {
-  console.log(`\noutputs:\n  ${outputs.artifact}`);
+  console.log("\noutputs:");
+  for (const file of outputs.artifacts) console.log(`  ${file}`);
 }

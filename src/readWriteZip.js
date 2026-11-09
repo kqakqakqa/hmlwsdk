@@ -96,7 +96,7 @@ const DOS_DATE = 0x0021; // 1980-01-01
 /**
  * 打包 zip
  * @param {Array<{name:string, content:Buffer}>} entries
- * @param {{ compress?: boolean }} [opts] compress=false 时用 stored，hap 里的 .bin 就是 stored
+ * @param {{ compress?: boolean }} [opts] compress=false 时用 stored，true 时 deflate level 9
  * @returns {Buffer}
  */
 export function writeZip(entries, opts = {}) {

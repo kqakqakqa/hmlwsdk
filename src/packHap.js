@@ -28,13 +28,27 @@ import { collectFiles, entryPath } from "./collectFiles.js";
  *
  * 这两种 hap 谁会进 .app：PackageApp.getHapPathFiles() 会过滤掉「文件名含 -bin- 且
  * deviceType 含 liteWearable」的，所以 .bin 形态进不了 .app，只有文件树形态进得去。
+ *
+ * **两种 hap 的压缩方式不同，是实测出来的，不是随手定的。**
+ *
+ *   .bin 形态 hap    deflate level 9    它是最终产物（设备直接装），外面不会再被压
+ *   文件树形态 hap    stored             它只进 .app，`.app` 那一层会压它
+ *
+ * 文件树 hap 如果也先压一遍，`.app` 再压已压缩的数据会**变大**：devdemo 实测
+ * 212814 B → 261441 B（deflate 对不可压数据只能退回 stored 块，还要额外挂块头）。
+ * 所以这份保持 stored，把压缩留给 `.app` 那一层做一次。
+ *
+ * 代价是 hap 本身不再与 Gradle 逐字节一致（Gradle 两种情况都 stored），
+ * 所以「字节一致」那几项验证只适用于 `.bin` 和 `.app` 里的内容，不适用于 hap。
+ * 设备能不能装 deflate 的 hap 没有实测过 —— zip 允许，但没拿真机验。
  */
 
 /**
  * 形态一：把一个 .bin 装进 hap
  *
- * 实测依据（apps/_empty/_empty 与 apps/_inactive/stock）：
- *   hap 是标准 zip，里面只放一个 .bin，且用 stored（不压缩）。
+ * Gradle 这里是 stored（不压缩）。本 SDK 改成 deflate level 9 —— 设备直接装的就是
+ * 这种包，压不压的标准只有一条：体积。`.bin` 内部是裸数据（见 readWriteBin），
+ * 外层这一压能省掉一半以上。
  *
  * @param {Buffer} binBuf       .bin 内容
  * @param {string} binFileName  放进 zip 里的文件名，例如 com.example.app-entry-signed.bin
@@ -42,14 +56,17 @@ import { collectFiles, entryPath } from "./collectFiles.js";
  */
 export function packBinHap(binBuf, binFileName) {
   if (!binFileName) throw new Error("the file name of the .bin inside the hap is required");
-  return writeZip([{ name: binFileName, content: binBuf }], { compress: false });
+  return writeZip([{ name: binFileName, content: binBuf }], { compress: true });
 }
 
 /**
  * 形态二：把 source 整个目录打成 hap
  *
  * 唯一的加工点：config.json 和每个组件的 manifest.json 换成紧凑单行版，
- * 里面其它文件原样塞进去（实测全部 stored，92 个条目 method 全是 0）。
+ * 里面其它文件原样塞进去。
+ *
+ * 用 stored：这份 hap 只进 `.app`，`.app` 那一层会把它作为整体 deflate 一次。
+ * 这里先压一遍会导致 `.app` 二次压缩时膨胀（实测 212814 B → 261441 B），见文件头。
  *
  * @param {string} sourceRoot  work/source
  * @param {object} config      最终版 config（已回填资源 id）

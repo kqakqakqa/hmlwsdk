@@ -1,6 +1,6 @@
 {
   "name": "hmlwsdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "HarmonyOS LiteWearable SDK",
   "type": "module",
   "main": "src/index.js",
@@ -19,7 +19,7 @@
     "hap",
     "hmlw"
   ],
-  "license": "ISC",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=18"
   }

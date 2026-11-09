@@ -1,6 +1,3 @@
-# machine-local config (the absolute path of hmlwsdk plus which node to use); re-run init after switching machines
-/hmlwsdk.config.js
-
 /node_modules
 .DS_Store
 

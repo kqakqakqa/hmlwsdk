@@ -1,24 +1,19 @@
 import fs from "fs";
 import path from "path";
-import { pathToFileURL } from "url";
 
 /**
- * 定位工程 + 读 hmlwsdk.config.js
+ * 定位工程根
  *
- * hmlwsdk.config.js **不进版本库**（init 会往工程根的 .gitignore 追加一行），
- * 里面只有两项，都是本机才有意义的：
+ * 只做一件事：从起点向上找到含 entry/src/main/config.json 的那一层。
  *
- *   sdkDir   这台机器上 hmlwsdk 的绝对路径
- *   node     跑 webpack 的那个 node，不写就用当前进程的 process.execPath
+ * 早先这里还会读 hmlwsdk.config.js（sdkDir + node）—— 因为 SDK 既不在 PATH 里、
+ * 也不是 npm 依赖，只能靠工程内那份文件算出「SDK 在哪」。那个文件已经取消：
+ * hmlwsdk 现在是工程的 devDependency，`npm run build` 直接调 `hmlwsdk build`，
+ * 跑 webpack 的 node 就是跑命令的这个 node（process.execPath）。
  *
- * 为什么不做成 package.json 的 file: 依赖：那样绝对路径会进版本库，
- * 换台机器 clone 下来 npm install 会指向一个不存在的目录，还得再改。
- * 而 sdkDir 只在被 ignore 的文件里，重新 init 一次就修好了。
- *
- * 编译相关但不随机器变的东西不在这里 —— 版本号在 build.config.js（进版本库）。
+ * 于是现在没有任何「必须存在的本机配置文件」—— clone 下来、npm install 之后
+ * 就能直接构建。缺 build.config.js 这类问题由 readProject 报，那儿知道缺的是哪个字段。
  */
-
-export const CONFIG_NAME = "hmlwsdk.config.js";
 
 /**
  * 从 start 向上找 liteWearable 工程根
@@ -48,42 +43,14 @@ export function findProjectRoot(start = process.cwd()) {
 }
 
 /**
- * 读工程根 + hmlwsdk.config.js，并校验 sdkDir / node 真的能用
+ * 读工程根
+ *
+ * 名字保留下来是给调用方一个稳定入口；它现在只做定位，别的校验交给各自的读取函数
+ * （缺 build.config.js 由 readProject 报，缺签名材料由 readSigningConfig 报）。
  *
  * @param {string} [projectDir] 工程目录或它下面的任意目录，省略用 cwd
- * @returns {Promise<{root:string, sdkDir:string, node:string, configPath:string}>}
+ * @returns {string} 工程根（含 entry/ 的那一层）
  */
-export async function readProjectConfig(projectDir) {
-  const root = findProjectRoot(projectDir);
-  const configPath = path.join(root, CONFIG_NAME);
-
-  if (!fs.existsSync(configPath)) {
-    throw new Error(
-      `${CONFIG_NAME} not found in ${root}\n` +
-        `run "hmlwsdk init" in that directory first — it writes ${CONFIG_NAME} with the ` +
-        `path of this SDK, plus hmlwsdk-build.js and the cert/ and build/ directories`
-    );
-  }
-
-  const config = (await import(pathToFileURL(configPath).href)).default ?? {};
-
-  if (!config.sdkDir) {
-    throw new Error(`${configPath} has no sdkDir, delete it and run "hmlwsdk init" again`);
-  }
-
-  const sdkDir = path.resolve(root, config.sdkDir);
-  const sdkEntry = path.join(sdkDir, "src", "build.js");
-  if (!fs.existsSync(sdkEntry)) {
-    throw new Error(
-      `${CONFIG_NAME} points at ${sdkDir}, but ${sdkEntry} is not there\n` +
-        `fix sdkDir in ${configPath}, or delete that file and run "hmlwsdk init" again`
-    );
-  }
-
-  const node = config.node ? path.resolve(root, config.node) : process.execPath;
-  if (!fs.existsSync(node)) {
-    throw new Error(`${CONFIG_NAME} points at node ${node}, which does not exist`);
-  }
-
-  return { root, sdkDir, node, configPath };
+export function readProjectConfig(projectDir) {
+  return findProjectRoot(projectDir);
 }
