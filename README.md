@@ -10,7 +10,7 @@ hmlwsdk build                # 一条命令出全部产物；签名材料丢进 
 
 已有 DevEco 工程的话跳过 `create`，先写一份 `build.config.js`（两个 SDK 版本号），再在工程根跑一次 `hmlwsdk init`（补 `cert/`、`build/`、`package.json` 的 build script 和依赖），之后一样随时 `hmlwsdk build` 或 `npm run build`。
 
-运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不依赖 native 二进制。
+运行只需要 Node.js 18 以上。不读本机安装的 HarmonyOS SDK，不需要 JDK、Gradle，也不需要自己编译 native 模块。
 
 ---
 
@@ -88,6 +88,8 @@ cd src/ace-loader
 npm install
 cd ../..
 ```
+
+⚠ 装 ace-loader 依赖时**别加 `--cpu=wasm32`**。默认安装会按平台装原生包（`@img/sharp-win32-x64` / `@img/sharp-darwin-arm64` / `@img/sharp-linux-x64` 等），自带 librsvg + pango + fontconfig，SVG 里的 `<text>` 正常栅格化。加了 `--cpu=wasm32` 装成的是 `@img/sharp-wasm32`，那套 libvips 用 resvg 渲染 SVG，resvg 不读系统字体 —— `<text>` 会被整段丢掉：图照样生成、构建也不报错，要到真机上才发现图上没字。
 
 然后把 `bin/` 加进 PATH，就能直接敲 `hmlwsdk`：
 
@@ -714,6 +716,7 @@ devdemo 端到端那 9 个不同条目就由上面三条构成：2 个资源 png
 | `it was set up by an older hmlwsdk (…)` | 构建时的提示，不是错误 —— 工程里还留着旧版 init 生成的文件。重跑 `hmlwsdk init`，然后删掉它点名的那几个文件 |
 | `cannot find a liteWearable project above <…>` | 当前目录及其上级都没有 `entry/src/main/config.json`。cd 进工程，或显式传工程目录 |
 | `src/ace-loader 缺构建工具 …` | submodule 没拉或没装依赖。`git submodule update --init`，再 `cd src/ace-loader && npm install` |
+| SVG 转出来的 png 里没有文字 | sharp 装成了 `@img/sharp-wasm32`（resvg 后端，不读系统字体，`<text>` 被丢掉）。到 `src/ace-loader` 下 `npm install --include=optional` 重装，别带 `--cpu=wasm32` |
 | `<…> 下没有 app.js，确认组件名 default 对不对` | `config.json` 的 `module.js[].name` 与 `src/main/js/` 下的目录名不一致 |
 | `<…>/build.config.js is missing` | 工程根没有 `build.config.js`。`create` 造出来的自带；老工程自己写一份（`export default { compileSdkVersion: 6, compatibleSdkVersion: 3 }`） |
 | `found N profile files in <cert>` / `found N signing keys in <cert>` | `cert/` 里有多个候选。在 `cert/signing.config.js` 里用 `p7b` / `p12` / `keyFile` 点名要哪个 |
